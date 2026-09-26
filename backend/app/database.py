@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from app.config import settings
 
-DB_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "graph8_agent_v2.db")
+DB_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "graph8_agent.db")
 
 class Database:
     def __init__(self):
@@ -151,6 +151,31 @@ class Database:
                 "graph8_mailbox_id": "mb_g8_demo_01",
                 "status": "active"
             })
+
+    async def reset_db(self):
+        """Wipes all transactional data and re-seeds fresh default reference emails."""
+        if self.supabase:
+            for tbl in ["events", "approvals", "agent_decisions", "variants", "contacts", "campaigns", "reference_emails", "mailbox_status"]:
+                try:
+                    self.supabase.table(tbl).delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+                except Exception:
+                    pass
+            await self._seed_defaults_if_empty()
+            return
+
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            await db.execute("DELETE FROM events")
+            await db.execute("DELETE FROM approvals")
+            await db.execute("DELETE FROM agent_decisions")
+            await db.execute("DELETE FROM variants")
+            await db.execute("DELETE FROM contacts")
+            await db.execute("DELETE FROM campaigns")
+            await db.execute("DELETE FROM reference_emails")
+            await db.execute("DELETE FROM settings")
+            await db.execute("DELETE FROM mailbox_status")
+            await db.commit()
+            await db.execute("VACUUM")
+        await self._seed_defaults_if_empty()
 
     # --- CAMPAIGNS ---
     async def get_campaigns(self) -> List[Dict[str, Any]]:

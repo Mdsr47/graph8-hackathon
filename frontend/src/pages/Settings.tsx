@@ -10,18 +10,23 @@ import {
   Copy,
   Check,
   ShieldCheck,
-  Zap
+  Zap,
+  Trash2,
+  RotateCcw
 } from 'lucide-react';
 import { SettingsData } from '../types';
 
 interface SettingsProps {
   settings: SettingsData;
   onRefreshMailbox: () => Promise<void>;
+  onResetDatabase?: () => Promise<void>;
 }
 
-export const Settings: React.FC<SettingsProps> = ({ settings, onRefreshMailbox }) => {
+export const Settings: React.FC<SettingsProps> = ({ settings, onRefreshMailbox, onResetDatabase }) => {
   const [copied, setCopied] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(settings.voice_escalation?.enabled || false);
+  const [resetting, setResetting] = useState(false);
+  const [resetSuccess, setResetSuccess] = useState(false);
 
   const copyWebhook = () => {
     navigator.clipboard.writeText(settings.webhook_url);
@@ -225,6 +230,54 @@ export const Settings: React.FC<SettingsProps> = ({ settings, onRefreshMailbox }
               When intent score exceeds 90, the agent queues a voice escalation approval gate.
             </p>
           </div>
+        </div>
+
+        {/* Database Management / Reset Zone */}
+        <div className="rounded-2xl bg-rose-950/20 border border-rose-500/30 p-5 space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-rose-500/20">
+            <div className="flex items-center gap-2.5">
+              <Trash2 className="w-4 h-4 text-rose-400" />
+              <h3 className="text-sm font-bold text-white">Database Management (Wipe & Refresh)</h3>
+            </div>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
+              Fresh Test Mode
+            </span>
+          </div>
+
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs">
+            <p className="text-[11px] text-slate-300 max-w-lg leading-relaxed">
+              Wipe all past campaigns, discovered prospects, variants, events, decisions, and approvals to start a fresh test session. Default reference email templates will be preserved.
+            </p>
+            <button
+              onClick={async () => {
+                if (!window.confirm("Are you sure you want to clear all database records?")) return;
+                setResetting(true);
+                setResetSuccess(false);
+                try {
+                  if (onResetDatabase) {
+                    await onResetDatabase();
+                  } else {
+                    await fetch('/api/settings/reset-database', { method: 'POST' });
+                  }
+                  setResetSuccess(true);
+                  setTimeout(() => setResetSuccess(false), 5000);
+                } finally {
+                  setResetting(false);
+                }
+              }}
+              disabled={resetting}
+              className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition shadow-lg shadow-rose-900/40 shrink-0 flex items-center gap-2 disabled:opacity-50 cursor-pointer"
+            >
+              <RotateCcw className={`w-3.5 h-3.5 ${resetting ? 'animate-spin' : ''}`} />
+              {resetting ? 'Resetting...' : 'Reset & Refresh Database'}
+            </button>
+          </div>
+          {resetSuccess && (
+            <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4" />
+              Database wiped cleanly! All dashboard screens have been refreshed to zero records.
+            </div>
+          )}
         </div>
       </div>
     </div>

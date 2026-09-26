@@ -42,8 +42,21 @@ async def get_settings():
         "custom_settings": db_settings
     }
 
+from datetime import datetime, timezone
+from app.services.sse_manager import sse_manager
+
 @router.post("")
 async def update_settings(payload: Dict[str, Any]):
     for k, v in payload.items():
         await db.set_setting(k, str(v))
     return {"status": "saved"}
+
+@router.post("/reset-database")
+async def reset_database():
+    """Wipes all transactional records and broadcasts database_reset event."""
+    await db.reset_db()
+    await sse_manager.broadcast("database_reset", {
+        "status": "cleared",
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    })
+    return {"status": "success", "message": "Database completely reset and refreshed with clean defaults."}

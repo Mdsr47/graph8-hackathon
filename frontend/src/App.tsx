@@ -83,10 +83,21 @@ export const App: React.FC = () => {
       setApprovals(prev => [data, ...prev]);
     } else if (eventType === 'approval_resolved') {
       setApprovals(prev => prev.map(a => a.id === data.id ? { ...a, status: data.status } : a));
-    } else if (eventType === 'webhook_event') {
+    } else if (eventType === 'webhook_event' || eventType === 'database_reset') {
       fetchAllData();
     }
   });
+
+  const handleResetDatabase = async () => {
+    try {
+      const res = await fetch('/api/settings/reset-database', { method: 'POST' });
+      if (res.ok) {
+        await fetchAllData();
+      }
+    } catch (err) {
+      console.error('Failed to reset database:', err);
+    }
+  };
 
   // Actions
   const handleSelectCampaign = (id: string) => {
@@ -259,6 +270,7 @@ export const App: React.FC = () => {
             <Settings
               settings={settingsData}
               onRefreshMailbox={fetchAllData}
+              onResetDatabase={handleResetDatabase}
             />
           )}
         </main>
