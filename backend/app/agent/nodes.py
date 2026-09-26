@@ -1,5 +1,6 @@
 import logging
-from typing import Dict, Any, List
+import json
+from typing import Dict, Any, List, Optional
 from app.agent.state import AgentState
 from app.adapters.graph8_client import graph8_client
 from app.llm.llm_client import llm_client
@@ -8,8 +9,34 @@ from app.services.sse_manager import sse_manager
 
 logger = logging.getLogger("agent_nodes")
 
+def compute_variant_score(variant: Dict[str, Any], prior_weight: float = 3.0, prior_rate: float = 0.05) -> float:
+    """
+    Computes a Bayesian confidence-adjusted conversion score.
+    Weights:
+      15% Open Rate
+      35% Reply Rate
+      50% Positive Reply Rate
+    Applies Laplace/Bayesian smoothing with prior pseudo-counts (prior_weight=3.0) 
+    to prevent erratic jumps from low sample sizes (e.g., 1 lucky reply on 3 sends).
+    """
+    sends = variant.get("sends_count", 0)
+    opens = variant.get("opens_count", 0)
+    replies = variant.get("replies_count", 0)
+    pos_replies = variant.get("positive_replies_count", 0)
+
+    if sends <= 0:
+        return 0.0
+
+    raw_open_rate = min(1.0, opens / sends)
+    raw_reply_rate = min(1.0, replies / sends)
+    raw_pos_rate = min(1.0, pos_replies / sends)
+
+    raw_composite = (0.15 * raw_open_rate) + (0.35 * raw_reply_rate) + (0.50 * raw_pos_rate)
+    smoothed_score = (raw_composite * sends + prior_weight * prior_rate) / (sends + prior_weight)
+    return round(smoothed_score, 4)
+
 async def signal_node(state: AgentState) -> AgentState:
-    """Pulls high-intent accounts from graph8 signals matching ICP filters."""
+    """Pulls high-intent accounts and discovers prospects in batches of 50."""
     campaign_id = state["campaign_id"]
     icp = state.get("icp_filters", {})
     logger.info(f"[signal_node] Discovering intent signals for campaign {campaign_id}")
@@ -19,8 +46,8 @@ async def signal_node(state: AgentState) -> AgentState:
     keywords = kw_resp.get("keywords", [])
     keyword_id = keywords[0]["id"] if keywords else "kw_01"
 
-    # Fetch contacts showing active buyer intent
-    g8_contacts = await graph8_client.get_contacts_for_keyword(keyword_id, limit=6)
+    # Search prospects up to batch size 50
+    g8_contacts = await graph8_client.get_contacts_for_keyword(keyword_id, limit=50)
     
     saved_contacts = []
     for c in g8_contacts:
@@ -36,11 +63,10 @@ async def signal_node(state: AgentState) -> AgentState:
         })
         saved_contacts.append(contact_record)
 
-    # Record decision
     decision = await db.create_decision({
         "campaign_id": campaign_id,
         "decision_type": "discover_signals",
-        "reasoning": f"Identified {len(saved_contacts)} high-intent decision makers from graph8 intent signals matching ICP criteria.",
+        "reasoning": f"Identified {len(saved_contacts)} high-intent decision makers from graph8 intent signals matching ICP criteria (batch limit: 50).",
         "before_state": {"contacts_count": 0},
         "after_state": {"contacts_count": len(saved_contacts), "sample_intent_score": 92},
         "requires_approval": False
@@ -80,7 +106,11 @@ async def enrichment_node(state: AgentState) -> AgentState:
     return state
 
 async def variant_generator_node(state: AgentState) -> AgentState:
-    """Generates 2 contrasting pitch variants (A/B testing) using LLM and few-shot examples."""
+    """
+    Generates 2 contrasting pitch variants (A/B testing) using LLM.
+    Respects Change 3: Uses whichever reference_emails rows were selected 
+    by the user for this specific campaign (stored in campaigns.reference_email_ids).
+    """
     campaign_id = state["campaign_id"]
     icp = state.get("icp_filters", {})
     logger.info(f"[variant_generator_node] Generating cold email variants for campaign {campaign_id}")
@@ -89,7 +119,16 @@ async def variant_generator_node(state: AgentState) -> AgentState:
     active_variants = [v for v in existing_variants if v["status"] == "active"]
 
     if not active_variants:
-        ref_emails = await db.get_reference_emails()
+        campaign = await db.get_campaign(campaign_id) or {}
+        selected_ref_ids = campaign.get("reference_email_ids", [])
+        
+        all_refs = await db.get_reference_emails()
+        if selected_ref_ids:
+            ref_emails = [r for r in all_refs if r["id"] in selected_ref_ids]
+        else:
+            # If user didn't pick any, do not force: pass general defaults or empty
+            ref_emails = all_refs[:2]
+
         generated = llm_client.generate_variants(icp, ref_emails)
 
         var_a_data = generated.get("variant_a", {})
@@ -100,7 +139,9 @@ async def variant_generator_node(state: AgentState) -> AgentState:
             "channel": "email",
             "subject": var_a_data.get("subject", "Quick question regarding outbound deliverability at {company}"),
             "body_template": var_a_data.get("body_template", "Hi {name}..."),
-            "status": "active"
+            "status": "active",
+            "score": 0.0,
+            "allocation_percentage": 50.0
         })
 
         v_b = await db.create_variant({
@@ -108,7 +149,9 @@ async def variant_generator_node(state: AgentState) -> AgentState:
             "channel": "email",
             "subject": var_b_data.get("subject", "3.2x booked meeting rate for {company}"),
             "body_template": var_b_data.get("body_template", "Hi {name}..."),
-            "status": "active"
+            "status": "active",
+            "score": 0.0,
+            "allocation_percentage": 50.0
         })
 
         # HITL Gate 1: First send of brand-new variants requires approval
@@ -118,7 +161,8 @@ async def variant_generator_node(state: AgentState) -> AgentState:
                 "campaign_id": campaign_id,
                 "variant_a": v_a,
                 "variant_b": v_b,
-                "strategy": "A/B split testing pain-point vs metric-driven angles"
+                "strategy": "A/B split testing pain-point vs metric-driven angles",
+                "reference_templates_used": len(ref_emails)
             },
             "status": "pending"
         })
@@ -126,7 +170,7 @@ async def variant_generator_node(state: AgentState) -> AgentState:
         decision = await db.create_decision({
             "campaign_id": campaign_id,
             "decision_type": "generate_variant",
-            "reasoning": "Generated Variant A (pain-point hook) and Variant B (ROI/metric benchmark) from reference emails. Submitted to Approvals queue for first-send clearance.",
+            "reasoning": f"Generated Variant A (pain-point hook) and Variant B (ROI/metric benchmark) modeled on {len(ref_emails)} chosen reference templates. Submitted to Approvals queue for first-send clearance.",
             "before_state": {"variants_active": 0},
             "after_state": {"variants_active": 2, "variant_ids": [v_a["id"], v_b["id"]]},
             "requires_approval": True
@@ -143,30 +187,50 @@ async def variant_generator_node(state: AgentState) -> AgentState:
     return state
 
 async def executor_node(state: AgentState) -> AgentState:
-    """Enrolls contacts into graph8 sequence, splitting evenly across active variants."""
+    """
+    Enrolls un-enrolled contacts into graph8 sequence, routing according to 
+    each variant's dynamic allocation_percentage (e.g. 50/50 initially, or 80/20, or 100/0),
+    and strictly respecting the campaign's daily_limit pacing.
+    """
     campaign_id = state["campaign_id"]
-    contacts = state.get("contacts", [])
-    variants = state.get("variants", [])
-    active_variants = [v for v in variants if v.get("status") == "active"]
+    campaign = await db.get_campaign(campaign_id) or {}
+    daily_limit = campaign.get("daily_limit", 50)
+    sent_today = campaign.get("sent_today", 0)
 
-    if not active_variants or not contacts:
+    remaining_daily_quota = max(0, daily_limit - sent_today)
+    if remaining_daily_quota <= 0:
+        logger.info(f"[executor_node] Campaign {campaign_id} reached daily limit of {daily_limit}. Batch held for next day.")
         return state
 
-    logger.info(f"[executor_node] Enrolling {len(contacts)} prospects across {len(active_variants)} variants.")
+    all_contacts = await db.get_contacts(campaign_id)
+    unenrolled = [c for c in all_contacts if c.get("status") == "new"][:remaining_daily_quota]
+
+    variants = await db.get_variants(campaign_id)
+    active_variants = [v for v in variants if v.get("status") == "active"]
+
+    if not active_variants or not unenrolled:
+        return state
+
+    logger.info(f"[executor_node] Enrolling {len(unenrolled)} prospects according to dynamic variant allocation.")
 
     enrolled = []
-    for i, contact in enumerate(contacts):
-        # Round-robin variant allocation
-        variant = active_variants[i % len(active_variants)]
+    for i, contact in enumerate(unenrolled):
+        if len(active_variants) == 1:
+            variant = active_variants[0]
+        else:
+            total_alloc = sum([v.get("allocation_percentage", 50.0) for v in active_variants]) or 100.0
+            threshold = (active_variants[0].get("allocation_percentage", 50.0) / total_alloc) * 100.0
+            bucket = (i * 37) % 100
+            variant = active_variants[0] if bucket < threshold else active_variants[1]
+
         custom_subj = variant["subject"].replace("{company}", contact.get("company", "your company")).replace("{name}", contact.get("name", "there"))
         custom_body = variant["body_template"].replace("{company}", contact.get("company", "your company")).replace("{name}", contact.get("name", "there")).replace("{title}", contact.get("title", "leader"))
 
-        # graph8 add to sequence
+        # Enroll in sequence
         await graph8_client.add_contacts_to_sequence("seq_auto_01", contact["id"], custom_subj, custom_body)
         await db.update_contact_status(contact["id"], "enrolled", step=1)
         await db.increment_variant_metric(variant["id"], "sends_count", 1)
 
-        # Log event
         event = await db.create_event({
             "contact_id": contact["id"],
             "variant_id": variant["id"],
@@ -176,12 +240,14 @@ async def executor_node(state: AgentState) -> AgentState:
         enrolled.append(contact)
         await sse_manager.broadcast("new_event", event)
 
+    await db.update_campaign_pacing(campaign_id, len(enrolled))
+
     decision = await db.create_decision({
         "campaign_id": campaign_id,
         "decision_type": "enroll_sequence",
-        "reasoning": f"Enrolled {len(enrolled)} contacts into sequence with 50/50 A/B variant split.",
-        "before_state": {"enrolled_count": 0},
-        "after_state": {"enrolled_count": len(enrolled)},
+        "reasoning": f"Enrolled {len(enrolled)} contacts into sequence (daily batch pacing: {sent_today + len(enrolled)}/{daily_limit} quota used).",
+        "before_state": {"enrolled_today": sent_today},
+        "after_state": {"enrolled_today": sent_today + len(enrolled)},
         "requires_approval": False
     })
     await sse_manager.broadcast("agent_decision", decision)
@@ -189,18 +255,22 @@ async def executor_node(state: AgentState) -> AgentState:
     return state
 
 async def feedback_node(state: AgentState) -> AgentState:
-    """Processes telemetry and updates live performance metrics."""
+    """Processes incoming telemetry metrics for campaign variants."""
     campaign_id = state["campaign_id"]
-    logger.info(f"[feedback_node] Recalculating telemetry metrics for campaign {campaign_id}")
+    logger.info(f"[feedback_node] Ingesting webhook telemetry for campaign {campaign_id}")
     variants = await db.get_variants(campaign_id)
     state["variants"] = variants
     return state
 
-async def reallocation_node(state: AgentState) -> AgentState:
+async def performance_evaluator_node(state: AgentState) -> AgentState:
     """
-    Reinforcement learning step:
-    Requires minimum sample size (e.g. 5 sends) before kill/reallocate decision.
-    Creates approval gate for any kill_variant decision.
+    Senior AI Reinforcement Evaluator:
+    Calculates Bayesian-smoothed composite conversion score for each variant:
+      Score = ( (0.15*OpenRate + 0.35*ReplyRate + 0.50*PosReplyRate) * N + 3*0.05 ) / (N + 3)
+    Guarantees:
+      - Evaluates true rates instead of raw counts.
+      - Respects MIN_SAMPLE_SIZE (5 sends) before declaring underperformer.
+      - Flags clearly underperforming variants when loser_score <= 0.40 * leader_score.
     """
     campaign_id = state["campaign_id"]
     variants = await db.get_variants(campaign_id)
@@ -210,79 +280,160 @@ async def reallocation_node(state: AgentState) -> AgentState:
         return state
 
     MIN_SAMPLE_SIZE = 5
-    var_a = active_variants[0]
-    var_b = active_variants[1]
 
-    sends_a = var_a.get("sends_count", 0)
-    sends_b = var_b.get("sends_count", 0)
+    scored_variants = []
+    for v in active_variants:
+        s = compute_variant_score(v)
+        v["score"] = s
+        await db.update_variant_reinforcement(v["id"], s, v.get("allocation_percentage", 50.0))
+        scored_variants.append(v)
 
-    # Check minimum sample size gate
-    if sends_a >= MIN_SAMPLE_SIZE and sends_b >= MIN_SAMPLE_SIZE:
-        pos_a = var_a.get("positive_replies_count", 0)
-        pos_b = var_b.get("positive_replies_count", 0)
+    scored_variants.sort(key=lambda x: x["score"], reverse=True)
+    leader = scored_variants[0]
+    trailer = scored_variants[-1]
 
-        # Self-healing condition: if Variant B wins by substantial margin
-        if pos_a == 0 and pos_b >= 1:
-            loser = var_a
-            winner = var_b
-            kill_reason = f"Variant A has 0 positive replies after {sends_a} sends, while Variant B achieved {pos_b} positive replies. Reallocating volume to Variant B and generating Variant C."
-            
-            # HITL Gate 2: Killing variant requires explicit approval
-            approval = await db.create_approval({
-                "type": "kill_variant",
-                "payload": {
-                    "campaign_id": campaign_id,
-                    "kill_variant_id": loser["id"],
-                    "winner_variant_id": winner["id"],
-                    "reasoning": kill_reason
-                },
-                "status": "pending"
-            })
+    sends_leader = leader.get("sends_count", 0)
+    sends_trailer = trailer.get("sends_count", 0)
 
-            decision = await db.create_decision({
-                "campaign_id": campaign_id,
-                "decision_type": "kill_variant",
-                "reasoning": kill_reason,
-                "before_state": {"variant_a_sends": sends_a, "variant_b_sends": sends_b},
-                "after_state": {"action": "kill_variant_a_pending_approval", "winner": winner["id"]},
-                "requires_approval": True
-            })
+    evaluation = {
+        "leader": leader,
+        "trailer": trailer,
+        "is_underperforming": False,
+        "confidence_met": sends_leader >= MIN_SAMPLE_SIZE and sends_trailer >= MIN_SAMPLE_SIZE,
+        "leader_score": leader["score"],
+        "trailer_score": trailer["score"]
+    }
 
-            await sse_manager.broadcast("agent_decision", decision)
-            await sse_manager.broadcast("approval_created", approval)
-            state["last_decision"] = decision
-            state.setdefault("pending_approvals", []).append(approval)
+    if evaluation["confidence_met"]:
+        score_ratio = trailer["score"] / (leader["score"] or 0.001)
+        pos_diff = leader.get("positive_replies_count", 0) - trailer.get("positive_replies_count", 0)
+        
+        # Clearly underperforming: score <= 40% of winner AND positive replies difference >= 1
+        if score_ratio <= 0.40 and pos_diff >= 1:
+            evaluation["is_underperforming"] = True
+            evaluation["loser"] = trailer
+            evaluation["winner"] = leader
+            evaluation["score_ratio"] = score_ratio
+            logger.info(f"[performance_evaluator_node] Clear underperformer detected: {trailer['id']} (Score: {trailer['score']}) vs Leader {leader['id']} (Score: {leader['score']})")
 
-        elif pos_b == 0 and pos_a >= 1:
-            loser = var_b
-            winner = var_a
-            kill_reason = f"Variant B has 0 positive replies after {sends_b} sends, while Variant A achieved {pos_a} positive replies. Reallocating volume to Variant A and generating Variant C."
+    state["evaluation"] = evaluation
+    return state
 
-            approval = await db.create_approval({
-                "type": "kill_variant",
-                "payload": {
-                    "campaign_id": campaign_id,
-                    "kill_variant_id": loser["id"],
-                    "winner_variant_id": winner["id"],
-                    "reasoning": kill_reason
-                },
-                "status": "pending"
-            })
+async def reallocation_node(state: AgentState) -> AgentState:
+    """
+    Reinforcement re-weighting node:
+    Shifts un-enrolled traffic allocation to winner (100%) and queues kill_variant proposal in HITL Approvals.
+    """
+    campaign_id = state["campaign_id"]
+    evaluation = state.get("evaluation") or {}
 
-            decision = await db.create_decision({
-                "campaign_id": campaign_id,
-                "decision_type": "kill_variant",
-                "reasoning": kill_reason,
-                "before_state": {"variant_a_sends": sends_a, "variant_b_sends": sends_b},
-                "after_state": {"action": "kill_variant_b_pending_approval", "winner": winner["id"]},
-                "requires_approval": True
-            })
+    if not evaluation.get("is_underperforming"):
+        return state
 
-            await sse_manager.broadcast("agent_decision", decision)
-            await sse_manager.broadcast("approval_created", approval)
-            state["last_decision"] = decision
-            state.setdefault("pending_approvals", []).append(approval)
+    winner = evaluation["winner"]
+    loser = evaluation["loser"]
+    ratio = evaluation.get("score_ratio", 0.0)
 
+    kill_reason = (
+        f"Statistical divergence detected (Wilson/Bayesian score {loser['score']:.3f} vs {winner['score']:.3f}, ratio {ratio:.1%}). "
+        f"Variant {loser['id'][:8]} underperformed after {loser.get('sends_count', 0)} sends. "
+        f"Reallocated 100% of future traffic to winner Variant {winner['id'][:8]} and queued mutant Variant C."
+    )
+
+    # Reallocate future traffic to winner
+    await db.update_variant_reinforcement(winner["id"], winner["score"], 100.0)
+    await db.update_variant_reinforcement(loser["id"], loser["score"], 0.0)
+
+    approval = await db.create_approval({
+        "type": "kill_variant",
+        "payload": {
+            "campaign_id": campaign_id,
+            "kill_variant_id": loser["id"],
+            "winner_variant_id": winner["id"],
+            "winner_score": winner["score"],
+            "loser_score": loser["score"],
+            "reasoning": kill_reason
+        },
+        "status": "pending"
+    })
+
+    decision = await db.create_decision({
+        "campaign_id": campaign_id,
+        "decision_type": "kill_variant",
+        "reasoning": kill_reason,
+        "before_state": {"allocation": {"winner": winner.get("allocation_percentage", 50.0), "loser": loser.get("allocation_percentage", 50.0)}},
+        "after_state": {"allocation": {"winner": 100.0, "loser": 0.0}, "kill_approval_id": approval["id"]},
+        "requires_approval": True
+    })
+
+    await sse_manager.broadcast("agent_decision", decision)
+    await sse_manager.broadcast("approval_created", approval)
+    state["last_decision"] = decision
+    state["kill_proposal"] = {"winner": winner, "loser": loser}
+    state.setdefault("pending_approvals", []).append(approval)
+    return state
+
+async def evolution_generator_node(state: AgentState) -> AgentState:
+    """
+    Spawns Variant C (the mutant challenger) following a kill decision.
+    Retains the winner's winning hooks and the campaign's chosen reference email styles.
+    Submits to HITL Gate before first send.
+    """
+    campaign_id = state["campaign_id"]
+    kill_proposal = state.get("kill_proposal")
+    if not kill_proposal:
+        return state
+
+    winner = kill_proposal["winner"]
+    campaign = await db.get_campaign(campaign_id) or {}
+    selected_ref_ids = campaign.get("reference_email_ids", [])
+    
+    all_refs = await db.get_reference_emails()
+    ref_emails = [r for r in all_refs if r["id"] in selected_ref_ids] if selected_ref_ids else all_refs[:2]
+
+    logger.info(f"[evolution_generator_node] Evolving Variant C from winner {winner['id']} for campaign {campaign_id}")
+
+    evolved = llm_client.generate_evolution_variant(
+        winner_variant=winner,
+        reference_emails=ref_emails,
+        icp_filters=campaign.get("icp_filters", {})
+    )
+
+    v_c = await db.create_variant({
+        "campaign_id": campaign_id,
+        "channel": "email",
+        "subject": evolved.get("subject", f"Quick question for {{company}} — {winner.get('subject')}"),
+        "body_template": evolved.get("body_template", winner.get("body_template")),
+        "status": "draft",
+        "score": 0.0,
+        "allocation_percentage": 50.0
+    })
+
+    # HITL Gate 3: Approval for newly evolved Variant C
+    approval = await db.create_approval({
+        "type": "send_replacement_variant",
+        "payload": {
+            "campaign_id": campaign_id,
+            "variant_c": v_c,
+            "parent_winner_id": winner["id"],
+            "evolution_rationale": evolved.get("evolution_rationale", "Iterated on winning hooks with social proof contrast.")
+        },
+        "status": "pending"
+    })
+
+    decision = await db.create_decision({
+        "campaign_id": campaign_id,
+        "decision_type": "generate_variant",
+        "reasoning": f"Generated Variant C (Evolution) by learning from winning hooks of Variant {winner['id'][:8]}. Submitted to Approvals queue for clearance.",
+        "before_state": {"variants_total": 2},
+        "after_state": {"variants_total": 3, "variant_c_id": v_c["id"]},
+        "requires_approval": True
+    })
+
+    await sse_manager.broadcast("agent_decision", decision)
+    await sse_manager.broadcast("approval_created", approval)
+    state["last_decision"] = decision
+    state.setdefault("pending_approvals", []).append(approval)
     return state
 
 async def voice_escalation_node(state: AgentState) -> AgentState:
@@ -293,7 +444,6 @@ async def voice_escalation_node(state: AgentState) -> AgentState:
 
     if hot_contacts:
         hot = hot_contacts[0]
-        # Gate behind approval
         approval = await db.create_approval({
             "type": "voice_escalation",
             "payload": {

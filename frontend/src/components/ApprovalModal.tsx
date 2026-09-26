@@ -16,9 +16,16 @@ export const ApprovalModal: React.FC<ApprovalModalProps> = ({
   if (!approval) return null;
 
   const [notes, setNotes] = useState('');
+  const [editedSubject, setEditedSubject] = useState(
+    approval.type === 'send_replacement_variant'
+      ? approval.payload?.variant_c?.subject || ''
+      : ''
+  );
   const [editedBody, setEditedBody] = useState(
     approval.type === 'reply_draft'
       ? approval.payload?.draft_body || ''
+      : approval.type === 'send_replacement_variant'
+      ? approval.payload?.variant_c?.body_template || ''
       : ''
   );
   const [submitting, setSubmitting] = useState(false);
@@ -29,6 +36,10 @@ export const ApprovalModal: React.FC<ApprovalModalProps> = ({
       const payload = { ...approval.payload };
       if (approval.type === 'reply_draft' && editedBody) {
         payload.draft_body = editedBody;
+      }
+      if (approval.type === 'send_replacement_variant') {
+        if (editedSubject) payload.subject = editedSubject;
+        if (editedBody) payload.body_template = editedBody;
       }
       await onResolve(approval.id, status, notes, payload);
       onClose();
@@ -43,6 +54,8 @@ export const ApprovalModal: React.FC<ApprovalModalProps> = ({
         return 'Approve First Send of New A/B Variants';
       case 'kill_variant':
         return 'Approve Self-Healing Variant Kill & Reallocation';
+      case 'send_replacement_variant':
+        return 'Approve Evolved Variant C (Mutant Challenger)';
       case 'reply_draft':
         return 'Approve AI-Drafted Prospect Reply';
       case 'voice_escalation':
@@ -100,7 +113,52 @@ export const ApprovalModal: React.FC<ApprovalModalProps> = ({
                 {approval.payload?.reasoning}
               </p>
               <div className="pt-2 text-[11px] text-slate-400">
-                Approving will immediately reallocate sequence traffic and instruct LLM to generate Variant C using winning angle telemetry.
+                Approving will immediately terminate the loser variant, shift 100% sequence traffic to the winning variant, and trigger Variant C mutant challenger review.
+              </div>
+            </div>
+          )}
+
+          {approval.type === 'send_replacement_variant' && (
+            <div className="space-y-4">
+              <div className="p-3.5 rounded-xl bg-indigo-950/40 border border-indigo-500/30 space-y-1.5">
+                <div className="flex items-center gap-1.5 text-indigo-400 text-xs font-bold">
+                  <Sparkles className="w-4 h-4" />
+                  <span>Evolution Strategy Rationale</span>
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  {approval.payload?.evolution_rationale || "Synthesized from winning hook telemetry and campaign reference styles."}
+                </p>
+                <div className="text-[11px] text-slate-400 pt-1">
+                  Iterated upon Parent Winner: <span className="font-mono text-indigo-300 font-semibold">{approval.payload?.parent_winner_id?.slice(0, 8)}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Variant C Subject Line (Editable):
+                </label>
+                <input
+                  type="text"
+                  value={editedSubject}
+                  onChange={(e) => setEditedSubject(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-sans"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Variant C Body Template (Editable):
+                </label>
+                <textarea
+                  rows={6}
+                  value={editedBody}
+                  onChange={(e) => setEditedBody(e.target.value)}
+                  className="w-full p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-sans leading-relaxed"
+                />
+              </div>
+
+              <div className="text-[11px] text-slate-400">
+                Approving will activate Variant C alongside the champion variant with an initial 50/50 traffic split.
               </div>
             </div>
           )}

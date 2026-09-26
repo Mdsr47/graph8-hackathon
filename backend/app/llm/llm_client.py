@@ -119,6 +119,60 @@ Generate Variant A and Variant B in JSON."""
         ]
         return self.generate(messages, temperature=0.5).strip()
 
+    def generate_evolution_variant(
+        self,
+        winner_variant: Dict[str, Any],
+        reference_emails: List[Dict[str, Any]],
+        icp_filters: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Generates Variant C (Evolution mutation) based on the winning variant's 
+        successful hooks and campaign's selected reference emails.
+        """
+        ref_text = "\n\n".join([
+            f"Reference Example #{i+1}:\nSubject: {r.get('subject')}\nBody:\n{r.get('body')}\nNotes: {r.get('style_notes', '')}"
+            for i, r in enumerate(reference_emails[:3])
+        ])
+
+        user_content = f"""The following email variant WON our initial outbound round with proven positive replies:
+Winner Subject: {winner_variant.get('subject')}
+Winner Body:
+{winner_variant.get('body_template')}
+Performance Score: {winner_variant.get('score', 0.0)} ({winner_variant.get('positive_replies_count', 0)} positive replies)
+
+Target ICP Filters:
+{json.dumps(icp_filters, indent=2)}
+
+Style Reference Examples:
+{ref_text if ref_text else 'None provided, follow winning pitch style.'}
+
+Task: Formulate Variant C (Evolution). Retain the winning core hook and value proposition, but introduce a sharper urgency angle or social proof contrast to challenge the champion variant.
+Return strictly valid JSON with keys "subject", "body_template", and "evolution_rationale"."""
+
+        messages = [
+            {"role": "system", "content": "You are an elite B2B sales copywriter specializing in self-healing outbound evolution. Output ONLY JSON."},
+            {"role": "user", "content": user_content}
+        ]
+
+        raw = self.generate(messages, temperature=0.7)
+        try:
+            clean_json = raw.strip()
+            if "```json" in clean_json:
+                clean_json = clean_json.split("```json")[1].split("```")[0].strip()
+            elif "```" in clean_json:
+                clean_json = clean_json.split("```")[1].split("```")[0].strip()
+            parsed = json.loads(clean_json)
+            if "subject" in parsed and "body_template" in parsed:
+                return parsed
+        except Exception:
+            pass
+
+        return {
+            "subject": f"Quick follow-up for {{company}} — {winner_variant.get('subject', 'outbound deliverability')}",
+            "body_template": winner_variant.get("body_template", "Hi {name},\n\nFollowing up on my previous note regarding outbound deliverability at {company}.\n\nBest,\nAlex"),
+            "evolution_rationale": "Iterated on winning variant angles with concise social proof and low friction CTA."
+        }
+
     def _default_variants(self, icp_filters: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "variant_a": {

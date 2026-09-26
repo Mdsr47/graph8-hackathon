@@ -89,13 +89,25 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({ campaignId, onBa
         </div>
 
         {/* Live Reinforcement Status */}
-        <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs">
-          <div className="font-semibold text-slate-300 flex items-center gap-1.5">
-            <BrainCircuit className="w-4 h-4 text-indigo-400" />
-            <span>Self-Healing Status</span>
+        <div className="flex items-center gap-3">
+          <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs">
+            <div className="font-semibold text-slate-300 flex items-center gap-1.5">
+              <BrainCircuit className="w-4 h-4 text-indigo-400" />
+              <span>Reinforcement Scoring</span>
+            </div>
+            <div className="text-[11px] text-slate-400 mt-0.5">
+              Bayesian confidence smoothing active (<strong className="text-white">Min 5 sends</strong>)
+            </div>
           </div>
-          <div className="text-[11px] text-slate-400 mt-0.5">
-            Min sample size threshold: <strong className="text-white">5 sends/variant</strong>.
+
+          <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs">
+            <div className="font-semibold text-slate-300 flex items-center gap-1.5">
+              <Send className="w-4 h-4 text-emerald-400" />
+              <span>Daily Send Pacing</span>
+            </div>
+            <div className="text-[11px] text-emerald-400 font-bold mt-0.5">
+              {campaign.sent_today || 0} / {campaign.daily_limit || 50} Contacts Sent
+            </div>
           </div>
         </div>
       </div>
@@ -119,6 +131,8 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({ campaignId, onBa
             const replies = v.replies_count || 0;
             const pos = v.positive_replies_count || 0;
             const isKilled = v.status === 'killed';
+            const score = typeof v.score === 'number' ? v.score : 0.0;
+            const alloc = typeof v.allocation_percentage === 'number' ? v.allocation_percentage : 50.0;
 
             return (
               <div
@@ -139,11 +153,13 @@ export const CampaignDetail: React.FC<CampaignDetailProps> = ({ campaignId, onBa
                         </span>
                       ) : (
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
-                          <CheckCircle2 className="w-3 h-3" /> ACTIVE WINNER
+                          <CheckCircle2 className="w-3 h-3" /> ACTIVE ({alloc}% Traffic)
                         </span>
                       )}
                     </span>
-                    <span className="text-[11px] text-slate-500 font-mono">{v.channel}</span>
+                    <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                      Score: {score.toFixed(3)}
+                    </span>
                   </div>
 
                   <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs font-medium text-white mb-3">

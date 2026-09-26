@@ -29,9 +29,31 @@ class Database:
                 name TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'draft',
                 icp_filters TEXT NOT NULL DEFAULT '{}',
+                reference_email_ids TEXT NOT NULL DEFAULT '[]',
+                daily_limit INTEGER DEFAULT 50,
+                sent_today INTEGER DEFAULT 0,
+                last_batch_run_at TEXT,
                 created_at TEXT NOT NULL,
                 org_id TEXT
             )""")
+
+            # Safe schema migrations for campaigns & variants
+            try:
+                await db.execute("ALTER TABLE campaigns ADD COLUMN reference_email_ids TEXT NOT NULL DEFAULT '[]'")
+            except Exception:
+                pass
+            try:
+                await db.execute("ALTER TABLE campaigns ADD COLUMN daily_limit INTEGER DEFAULT 50")
+            except Exception:
+                pass
+            try:
+                await db.execute("ALTER TABLE campaigns ADD COLUMN sent_today INTEGER DEFAULT 0")
+            except Exception:
+                pass
+            try:
+                await db.execute("ALTER TABLE campaigns ADD COLUMN last_batch_run_at TEXT")
+            except Exception:
+                pass
 
             await db.execute("""
             CREATE TABLE IF NOT EXISTS contacts (
@@ -62,9 +84,20 @@ class Database:
                 replies_count INTEGER DEFAULT 0,
                 positive_replies_count INTEGER DEFAULT 0,
                 meetings_count INTEGER DEFAULT 0,
+                score REAL DEFAULT 0.0,
+                allocation_percentage REAL DEFAULT 50.0,
                 created_at TEXT NOT NULL,
                 killed_at TEXT
             )""")
+
+            try:
+                await db.execute("ALTER TABLE variants ADD COLUMN score REAL DEFAULT 0.0")
+            except Exception:
+                pass
+            try:
+                await db.execute("ALTER TABLE variants ADD COLUMN allocation_percentage REAL DEFAULT 50.0")
+            except Exception:
+                pass
 
             await db.execute("""
             CREATE TABLE IF NOT EXISTS events (
@@ -188,6 +221,10 @@ class Database:
                 "name": r["name"],
                 "status": r["status"],
                 "icp_filters": json.loads(r["icp_filters"] or "{}"),
+                "reference_email_ids": json.loads(r["reference_email_ids"] or "[]") if "reference_email_ids" in r.keys() and r["reference_email_ids"] else [],
+                "daily_limit": r["daily_limit"] if "daily_limit" in r.keys() else 50,
+                "sent_today": r["sent_today"] if "sent_today" in r.keys() else 0,
+                "last_batch_run_at": r["last_batch_run_at"] if "last_batch_run_at" in r.keys() else None,
                 "created_at": r["created_at"],
                 "org_id": r["org_id"]
             } for r in rows]
@@ -204,6 +241,10 @@ class Database:
                 "name": r["name"],
                 "status": r["status"],
                 "icp_filters": json.loads(r["icp_filters"] or "{}"),
+                "reference_email_ids": json.loads(r["reference_email_ids"] or "[]") if "reference_email_ids" in r.keys() and r["reference_email_ids"] else [],
+                "daily_limit": r["daily_limit"] if "daily_limit" in r.keys() else 50,
+                "sent_today": r["sent_today"] if "sent_today" in r.keys() else 0,
+                "last_batch_run_at": r["last_batch_run_at"] if "last_batch_run_at" in r.keys() else None,
                 "created_at": r["created_at"],
                 "org_id": r["org_id"]
             }
@@ -212,10 +253,14 @@ class Database:
         cid = data.get("id") or str(uuid.uuid4())
         created_at = data.get("created_at") or datetime.now(timezone.utc).isoformat()
         icp = json.dumps(data.get("icp_filters", {}))
+        ref_ids = json.dumps(data.get("reference_email_ids", []))
+        daily_lim = data.get("daily_limit", 50)
         async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
             await db.execute(
-                "INSERT INTO campaigns (id, name, status, icp_filters, created_at, org_id) VALUES (?, ?, ?, ?, ?, ?)",
-                (cid, data["name"], data.get("status", "draft"), icp, created_at, data.get("org_id"))
+                """INSERT INTO campaigns 
+                (id, name, status, icp_filters, reference_email_ids, daily_limit, sent_today, created_at, org_id) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (cid, data["name"], data.get("status", "draft"), icp, ref_ids, daily_lim, 0, created_at, data.get("org_id"))
             )
             await db.commit()
         return await self.get_campaign(cid)
@@ -223,6 +268,16 @@ class Database:
     async def update_campaign_status(self, campaign_id: str, status: str) -> bool:
         async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
             await db.execute("UPDATE campaigns SET status = ? WHERE id = ?", (status, campaign_id))
+            await db.commit()
+            return True
+
+    async def update_campaign_pacing(self, campaign_id: str, added_sends: int) -> bool:
+        now = datetime.now(timezone.utc).isoformat()
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            await db.execute(
+                "UPDATE campaigns SET sent_today = sent_today + ?, last_batch_run_at = ? WHERE id = ?",
+                (added_sends, now, campaign_id)
+            )
             await db.commit()
             return True
 
@@ -297,6 +352,8 @@ class Database:
                 "replies_count": r["replies_count"],
                 "positive_replies_count": r["positive_replies_count"],
                 "meetings_count": r["meetings_count"],
+                "score": r["score"] if "score" in r.keys() else 0.0,
+                "allocation_percentage": r["allocation_percentage"] if "allocation_percentage" in r.keys() else 50.0,
                 "created_at": r["created_at"],
                 "killed_at": r["killed_at"]
             } for r in rows]
@@ -320,6 +377,8 @@ class Database:
                 "replies_count": r["replies_count"],
                 "positive_replies_count": r["positive_replies_count"],
                 "meetings_count": r["meetings_count"],
+                "score": r["score"] if "score" in r.keys() else 0.0,
+                "allocation_percentage": r["allocation_percentage"] if "allocation_percentage" in r.keys() else 50.0,
                 "created_at": r["created_at"],
                 "killed_at": r["killed_at"]
             }
@@ -327,18 +386,30 @@ class Database:
     async def create_variant(self, data: Dict[str, Any]) -> Dict[str, Any]:
         vid = data.get("id") or str(uuid.uuid4())
         created_at = data.get("created_at") or datetime.now(timezone.utc).isoformat()
+        score = data.get("score", 0.0)
+        alloc = data.get("allocation_percentage", 50.0)
         async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
             await db.execute(
                 """INSERT INTO variants 
-                (id, campaign_id, channel, subject, body_template, status, sends_count, opens_count, replies_count, positive_replies_count, meetings_count, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (id, campaign_id, channel, subject, body_template, status, sends_count, opens_count, replies_count, positive_replies_count, meetings_count, score, allocation_percentage, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (vid, data["campaign_id"], data.get("channel", "email"), data["subject"], data["body_template"],
                  data.get("status", "active"), data.get("sends_count", 0), data.get("opens_count", 0),
-                 data.get("replies_count", 0), data.get("positive_replies_count", 0), data.get("meetings_count", 0), created_at)
+                 data.get("replies_count", 0), data.get("positive_replies_count", 0), data.get("meetings_count", 0), score, alloc, created_at)
             )
             await db.commit()
         data["id"] = vid
+        data["score"] = score
+        data["allocation_percentage"] = alloc
         return data
+
+    async def update_variant_reinforcement(self, variant_id: str, score: float, allocation_percentage: float):
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            await db.execute(
+                "UPDATE variants SET score = ?, allocation_percentage = ? WHERE id = ?",
+                (score, allocation_percentage, variant_id)
+            )
+            await db.commit()
 
     async def increment_variant_metric(self, variant_id: str, metric: str, amount: int = 1):
         allowed_metrics = ["sends_count", "opens_count", "replies_count", "positive_replies_count", "meetings_count"]
@@ -346,6 +417,29 @@ class Database:
             return
         async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
             await db.execute(f"UPDATE variants SET {metric} = {metric} + ? WHERE id = ?", (amount, variant_id))
+            await db.commit()
+
+    async def update_variant(self, variant_id: str, status: Optional[str] = None, subject: Optional[str] = None, body_template: Optional[str] = None, allocation_percentage: Optional[float] = None):
+        fields = []
+        params = []
+        if status is not None:
+            fields.append("status = ?")
+            params.append(status)
+        if subject is not None:
+            fields.append("subject = ?")
+            params.append(subject)
+        if body_template is not None:
+            fields.append("body_template = ?")
+            params.append(body_template)
+        if allocation_percentage is not None:
+            fields.append("allocation_percentage = ?")
+            params.append(allocation_percentage)
+        if not fields:
+            return
+        params.append(variant_id)
+        query = f"UPDATE variants SET {', '.join(fields)} WHERE id = ?"
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            await db.execute(query, tuple(params))
             await db.commit()
 
     async def kill_variant(self, variant_id: str):

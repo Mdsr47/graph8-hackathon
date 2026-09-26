@@ -76,39 +76,51 @@ Built for the graph8 RevOps Hackathon. Powered by **graph8**, **LangGraph**, **G
 
 ---
 
-## 3. LangGraph Workflow Graph
+## 3. LangGraph Reinforcement Loop & Self-Healing Architecture
 
 ```
-[Start Campaign] ──> (1. signal_node)
+[Start Campaign] ──> (1. signal_node: 50 Batch)
                             │
                             ▼
                     (2. enrichment_node)
                             │
                             ▼
-                 (3. variant_generator_node)
+                 (3. variant_generator_node: Ref Style Picker)
                             │
                             ▼
-                    (4. executor_node) ──> Enrolls contacts in sequence
+                    (4. executor_node: Daily Pacing Limit 50/day)
                             │
                             ▼
-                    [ Incoming Webhook ]
+                    [ Incoming Webhooks: Opens / Replies / Bounces ]
                             │
                             ▼
-                    (5. feedback_node) ──> Recalculates CTR & Sentiments
+                    (5. feedback_node: Ingests Telemetry)
                             │
                             ▼
-                  (6. reallocation_node)
+             (6. performance_evaluator_node: Bayesian Smoothed Scores)
                             │
       ┌─────────────────────┴─────────────────────┐
       │                                           │
-[Sample Size >= 5 & Loser Found]      [Intent Score >= 90 Hot Lead]
+[Confidence Met N >= 5 & Loser <= 40% of Winner]  [Intent Score >= 90 Hot Lead]
       │                                           │
       ▼                                           ▼
-[HITL Approval Gate: Kill Variant]    (7. voice_escalation_node)
+(7. reallocation_node: 100% to Winner)      (9. voice_escalation_node)
       │                                           │
       ▼                                           ▼
-(Loop back to Variant Generator C)           [Gate: Approve Call]
+[HITL Gate: Approve Kill Variant]           [HITL Gate: Approve Call]
+      │
+      ▼
+(8. evolution_generator_node: Spawn Variant C Challenger)
+      │
+      ▼
+[HITL Gate: Review & Edit Variant C] ──> (50/50 Traffic Split)
 ```
+
+### Bayesian Smoothing & Convergence Threshold Formula
+$$\text{Score} = \frac{(0.15 \times \text{OpenRate} + 0.35 \times \text{ReplyRate} + 0.50 \times \text{PosReplyRate}) \times N + 3 \times 0.05}{N + 3}$$
+- Prevents 1-send 100% reply false positives.
+- Evaluates statistical divergence once $N \ge 5$ sends are reached.
+- Flags loser when $\text{Score}_{\text{loser}} \le 0.40 \times \text{Score}_{\text{leader}}$ with positive reply difference $\ge 1$.
 
 ---
 
@@ -116,11 +128,15 @@ Built for the graph8 RevOps Hackathon. Powered by **graph8**, **LangGraph**, **G
 
 | Specification / Requirement | Implementation in Repository | Status |
 |---|---|---|
-| **Database (Supabase / Postgres)** | `backend/schema.sql` (9 complete tables) & `backend/app/database.py` with automatic SQLite local fallback | **Complete & Verified** |
+| **User Journey & Checklists Guide** | [`USER_JOURNEY_AND_TESTING_GUIDE.md`](USER_JOURNEY_AND_TESTING_GUIDE.md) (and `.txt`): Complete step-by-step user journey, 140 API scopes checklist, 70+ webhook events checklist, DB reset guide. | **Complete & Verified** |
+| **Bayesian Reinforcement Loop** | `backend/app/agent/nodes.py` (`performance_evaluator_node`, `reallocation_node`, `evolution_generator_node`) with real rates evaluation and 40% underperformance threshold. | **Complete & Verified** |
+| **Reference Email Style Picker** | Multi-select picker on campaign creation and variant generator respecting chosen few-shot examples. | **Complete & Verified** |
+| **Daily Pacing Limit & Batching** | Enforced 50 batch max on contact search + `daily_limit=50` pacing on sequences to protect domain warmup. | **Complete & Verified** |
+| **Multi-Tenant Agency Support** | `X-Target-Org-Id: <client_org_id>` cross-tenant header in `backend/app/adapters/graph8_client.py` and `create_client_org()` placeholder. | **Complete & Verified** |
+| **Database & Reset Utility** | `backend/schema.sql`, `backend/app/database.py` and instant 1-command reset: `python backend/reset_database.py`. | **Complete & Verified** |
 | **graph8 Client Adapter** | `backend/app/adapters/graph8_client.py` implementing all confirmed endpoints (`/intent`, `/search`, `/enrichment`, `/contacts`, `/sequences`, `/inbox`, `/webhooks`, `/mailboxes`) with 3x retry and logging | **Complete & Verified** |
 | **Provider-Swappable LLM** | `backend/app/llm/llm_client.py` OpenAI-compatible client defaulting to Groq `llama-3.3-70b-versatile` | **Complete & Verified** |
-| **LangGraph Cyclical StateGraph** | `backend/app/agent/workflow.py` and `backend/app/agent/nodes.py` with state checkpointing and reinforcement feedback re-entry | **Complete & Verified** |
-| **Human-In-The-Loop Gates** | `backend/app/routers/approvals.py` gating first sends, variant killing, AI reply sending, and voice calls | **Complete & Verified** |
+| **Human-In-The-Loop Gates** | `backend/app/routers/approvals.py` gating first sends, variant killing, Variant C evolution, AI reply sending, and voice calls | **Complete & Verified** |
 | **Real-Time Stream (SSE)** | `backend/app/services/sse_manager.py` & `frontend/src/hooks/useLiveFeed.ts` broadcasting live events | **Complete & Verified** |
 | **Webhook Receiver & Inbound Mailbox** | `backend/app/routers/webhooks.py` with signature verification, sentiment classifier, and interactive simulator | **Complete & Verified** |
 | **9-Page React Dashboard** | `frontend/src/pages/` (Overview, Campaigns, Detail, Prospects, Inbox, Decisions, Approvals, Ref Emails, Settings) | **Complete & Verified** |

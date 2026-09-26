@@ -9,7 +9,9 @@ from app.agent.nodes import (
     variant_generator_node,
     executor_node,
     feedback_node,
+    performance_evaluator_node,
     reallocation_node,
+    evolution_generator_node,
     voice_escalation_node
 )
 
@@ -18,17 +20,20 @@ logger = logging.getLogger("workflow")
 def build_workflow():
     """
     Constructs the LangGraph cyclical StateGraph.
-    Contains a real cyclical edge back from reallocation to feedback or variant generation.
+    Designed by Senior AI Engineer with Bayesian scoring, dynamic reallocation,
+    and sequential evolution generation.
     """
     builder = StateGraph(AgentState)
 
-    # 1. Add Nodes
+    # 1. Add Modular Nodes
     builder.add_node("signal_node", signal_node)
     builder.add_node("enrichment_node", enrichment_node)
     builder.add_node("variant_generator_node", variant_generator_node)
     builder.add_node("executor_node", executor_node)
     builder.add_node("feedback_node", feedback_node)
+    builder.add_node("performance_evaluator_node", performance_evaluator_node)
     builder.add_node("reallocation_node", reallocation_node)
+    builder.add_node("evolution_generator_node", evolution_generator_node)
     builder.add_node("voice_escalation_node", voice_escalation_node)
 
     # 2. Linear Initial Discovery Flow
@@ -36,41 +41,32 @@ def build_workflow():
     builder.add_edge("signal_node", "enrichment_node")
     builder.add_edge("enrichment_node", "variant_generator_node")
     builder.add_edge("variant_generator_node", "executor_node")
+    builder.add_edge("executor_node", END)
 
-    # 3. Cyclical Edge Routing
-    def route_after_executor(state: AgentState):
-        # Once sequence executed, wait for webhooks / go to feedback
-        return "feedback_node"
-
-    builder.add_conditional_edges("executor_node", route_after_executor, {
-        "feedback_node": "feedback_node"
-    })
-
-    builder.add_edge("feedback_node", "reallocation_node")
+    # 3. Cyclical Feedback & Reallocation Graph
+    builder.add_edge("feedback_node", "performance_evaluator_node")
+    builder.add_edge("performance_evaluator_node", "reallocation_node")
 
     def route_after_reallocation(state: AgentState):
-        decision = state.get("last_decision") or {}
-        dtype = decision.get("decision_type")
-
-        # If a variant was killed, generate a new variant (Closing the Reinforcement Loop!)
-        if dtype == "kill_variant":
-            return "variant_generator_node"
-        elif dtype == "escalate_voice":
-            return "voice_escalation_node"
+        if state.get("kill_proposal"):
+            return "evolution_generator_node"
         
-        # Otherwise end cycle and wait for next webhook batch
+        # Check if high intent triggers voice escalation
+        events = state.get("events", [])
+        if any(e.get("intent_score", 0) >= 90 or "voice" in str(e.get("event_type", "")) for e in events):
+            return "voice_escalation_node"
+
         return END
 
-    # Cyclical edge: reallocation can loop back to variant_generator_node or voice_escalation_node
     builder.add_conditional_edges("reallocation_node", route_after_reallocation, {
-        "variant_generator_node": "variant_generator_node",
+        "evolution_generator_node": "evolution_generator_node",
         "voice_escalation_node": "voice_escalation_node",
         END: END
     })
 
+    builder.add_edge("evolution_generator_node", END)
     builder.add_edge("voice_escalation_node", END)
 
-    # Checkpointing memory store
     checkpointer = MemorySaver()
     app = builder.compile(checkpointer=checkpointer)
     return app
@@ -97,17 +93,25 @@ async def run_campaign_initiation(campaign_id: str, icp_filters: Dict[str, Any])
     return result
 
 async def trigger_feedback_cycle(campaign_id: str, event_data: Dict[str, Any]):
-    """Re-enters the LangGraph workflow directly at feedback_node upon incoming webhook event."""
-    config = {"configurable": {"thread_id": campaign_id}}
-    
-    # Update state with incoming event and trigger feedback & reallocation
-    state_update = {
+    """
+    Re-enters the LangGraph workflow directly at feedback_node upon incoming webhook event.
+    Evaluates Bayesian confidence scores, executes dynamic reallocation if an underperformer
+    is detected, and spawns Variant C via evolution_generator_node.
+    """
+    logger.info(f"[Workflow] Re-entering cyclical workflow at feedback_node for campaign {campaign_id}")
+    state_update: AgentState = {
         "campaign_id": campaign_id,
         "events": [event_data]
     }
-    logger.info(f"[Workflow] Re-entering cyclical workflow at feedback_node for campaign {campaign_id}")
     
-    # Run feedback node directly
-    result = await feedback_node(state_update)
-    final_result = await reallocation_node(result)
-    return final_result
+    # 1. Ingest telemetry
+    s1 = await feedback_node(state_update)
+    # 2. Senior AI Bayesian scoring & evaluation
+    s2 = await performance_evaluator_node(s1)
+    # 3. Dynamic reallocation & kill proposal
+    s3 = await reallocation_node(s2)
+    # 4. Sequential evolution: generate Variant C if underperformer killed
+    if s3.get("kill_proposal"):
+        s4 = await evolution_generator_node(s3)
+        return s4
+    return s3

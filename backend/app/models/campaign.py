@@ -12,12 +12,17 @@ class ICPFilter(BaseModel):
 class CampaignCreate(BaseModel):
     name: str
     icp_filters: Optional[ICPFilter] = None
-    target_contacts_limit: int = 10
+    reference_email_ids: Optional[List[str]] = Field(default_factory=list)
+    daily_limit: Optional[int] = 50
+    target_contacts_limit: int = 50
 
 class Campaign(BaseModel):
     id: str
     name: str
     status: str = "draft"  # draft, active, paused, completed
     icp_filters: Dict[str, Any] = Field(default_factory=dict)
+    reference_email_ids: List[str] = Field(default_factory=list)
+    daily_limit: int = 50
+    sent_today: int = 0
     created_at: datetime = Field(default_factory=datetime.utcnow)
     org_id: Optional[str] = None

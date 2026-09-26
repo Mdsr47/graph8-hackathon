@@ -43,7 +43,9 @@ async def create_campaign(req: CampaignCreate, background_tasks: BackgroundTasks
     camp = await db.create_campaign({
         "name": req.name,
         "status": "active",
-        "icp_filters": icp_dict
+        "icp_filters": icp_dict,
+        "reference_email_ids": req.reference_email_ids or [],
+        "daily_limit": req.daily_limit or 50
     })
 
     # Run LangGraph discovery & variant generation workflow in background

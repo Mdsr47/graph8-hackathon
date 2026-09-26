@@ -6,12 +6,16 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- 1. CAMPAIGNS
--- Core campaign configuration, ICP filters, and lifecycle status
+-- Core campaign configuration, ICP filters, lifecycle status, reference style templates, and batch pacing
 CREATE TABLE IF NOT EXISTS campaigns (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'draft', -- draft, active, paused, completed
     icp_filters JSONB NOT NULL DEFAULT '{}'::jsonb,
+    reference_email_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+    daily_limit INTEGER DEFAULT 50,
+    sent_today INTEGER DEFAULT 0,
+    last_batch_run_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     org_id TEXT
 );
@@ -47,6 +51,8 @@ CREATE TABLE IF NOT EXISTS variants (
     replies_count INTEGER DEFAULT 0,
     positive_replies_count INTEGER DEFAULT 0,
     meetings_count INTEGER DEFAULT 0,
+    score REAL DEFAULT 0.0, -- Confidence-adjusted composite conversion score
+    allocation_percentage REAL DEFAULT 50.0, -- Dynamic percentage of un-enrolled contacts routed here
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     killed_at TIMESTAMPTZ
 );

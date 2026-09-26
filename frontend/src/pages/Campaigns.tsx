@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
 import { Plus, Megaphone, Pause, Play, ArrowRight, Target, Sparkles } from 'lucide-react';
-import { Campaign } from '../types';
+import { Campaign, ReferenceEmail } from '../types';
 
 interface CampaignsProps {
   campaigns: Campaign[];
+  referenceEmails: ReferenceEmail[];
   onSelectCampaign: (id: string) => void;
-  onCreateCampaign: (name: string, icp: any) => Promise<void>;
+  onCreateCampaign: (name: string, icp: any, refIds: string[], dailyLimit: number) => Promise<void>;
   onToggleStatus: (id: string, currentStatus: string) => Promise<void>;
 }
 
 export const Campaigns: React.FC<CampaignsProps> = ({
   campaigns,
+  referenceEmails,
   onSelectCampaign,
   onCreateCampaign,
   onToggleStatus,
@@ -20,6 +22,8 @@ export const Campaigns: React.FC<CampaignsProps> = ({
   const [industry, setIndustry] = useState('Fintech & Enterprise SaaS');
   const [titles, setTitles] = useState('VP Sales, Head of Sales, CRO, Founder');
   const [keywords, setKeywords] = useState('sales automation, deliverability, outbound intelligence');
+  const [selectedRefIds, setSelectedRefIds] = useState<string[]>([]);
+  const [dailyLimit, setDailyLimit] = useState(50);
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -27,13 +31,19 @@ export const Campaigns: React.FC<CampaignsProps> = ({
     if (!name.trim()) return;
     setSubmitting(true);
     try {
-      await onCreateCampaign(name, {
-        industry,
-        target_titles: titles.split(',').map((t) => t.trim()),
-        keywords: keywords.split(',').map((k) => k.trim()),
-      });
+      await onCreateCampaign(
+        name,
+        {
+          industry,
+          target_titles: titles.split(',').map((t) => t.trim()),
+          keywords: keywords.split(',').map((k) => k.trim()),
+        },
+        selectedRefIds,
+        dailyLimit
+      );
       setIsModalOpen(false);
       setName('');
+      setSelectedRefIds([]);
     } finally {
       setSubmitting(false);
     }
@@ -187,6 +197,77 @@ export const Campaigns: React.FC<CampaignsProps> = ({
                   onChange={(e) => setKeywords(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500"
                 />
+              </div>
+
+              {/* CHANGE 3: Multi-Select Reference Email Style Picker */}
+              <div className="pt-2 border-t border-slate-800">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-white">
+                    Style Reference Emails (Few-Shot Guides)
+                  </label>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300">
+                    {selectedRefIds.length} Selected
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 mb-2">
+                  Use these as style references for this campaign's variants (default: none selected).
+                </p>
+                <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                  {referenceEmails.length === 0 ? (
+                    <div className="text-[11px] text-slate-500 p-2.5 rounded-xl bg-slate-950/60 border border-slate-800">
+                      No reference emails saved. Go to Reference Emails tab to add high-converting templates.
+                    </div>
+                  ) : (
+                    referenceEmails.map((ref) => {
+                      const isChecked = selectedRefIds.includes(ref.id);
+                      return (
+                        <label
+                          key={ref.id}
+                          className={`flex items-start gap-2.5 p-2 rounded-xl border text-xs cursor-pointer transition ${
+                            isChecked
+                              ? 'bg-indigo-950/40 border-indigo-500/50 text-white'
+                              : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:border-slate-700'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => {
+                              if (isChecked) {
+                                setSelectedRefIds(selectedRefIds.filter((id) => id !== ref.id));
+                              } else {
+                                setSelectedRefIds([...selectedRefIds, ref.id]);
+                              }
+                            }}
+                            className="mt-0.5 rounded text-indigo-600 focus:ring-0"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="font-semibold truncate text-[11px] text-white">{ref.subject}</div>
+                            <div className="text-[10px] text-slate-400 line-clamp-1">{ref.style_notes || ref.body}</div>
+                          </div>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* Batch Limit / Pacing */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Daily Send Pacing Limit (Batch Size)
+                </label>
+                <input
+                  type="number"
+                  min={5}
+                  max={500}
+                  value={dailyLimit}
+                  onChange={(e) => setDailyLimit(Number(e.target.value))}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500"
+                />
+                <span className="text-[10px] text-slate-500 mt-1 block">
+                  Enrolls prospects up to this quota daily to safeguard domain reputation.
+                </span>
               </div>
 
               <div className="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-xs text-indigo-300 flex items-start gap-2">

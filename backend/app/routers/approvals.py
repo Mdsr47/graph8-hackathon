@@ -34,23 +34,24 @@ async def resolve_approval(approval_id: str, req: ApprovalResolveRequest):
 
         elif app_type == "kill_variant":
             kill_vid = payload.get("kill_variant_id")
-            campaign_id = payload.get("campaign_id")
             if kill_vid:
                 await db.kill_variant(kill_vid)
+            execution_result = {"killed_variant_id": kill_vid, "status": "killed"}
 
-            # Auto-generate replacement Variant C
-            if campaign_id:
-                ref_emails = await db.get_reference_emails()
-                gen = llm_client.generate_variants({"industry": "B2B SaaS"}, ref_emails)
-                v_c_data = gen.get("variant_b", {})
-                new_var = await db.create_variant({
-                    "campaign_id": campaign_id,
-                    "channel": "email",
-                    "subject": v_c_data.get("subject", "Evolving our outbound strategy for {company}"),
-                    "body_template": v_c_data.get("body_template", "Hi {name}..."),
-                    "status": "active"
-                })
-                execution_result = {"killed_variant_id": kill_vid, "new_variant_generated": new_var}
+        elif app_type == "send_replacement_variant":
+            variant_c = payload.get("variant_c") or {}
+            vid = variant_c.get("id")
+            if vid:
+                updated_subj = payload.get("subject") or variant_c.get("subject")
+                updated_body = payload.get("body_template") or variant_c.get("body_template")
+                await db.update_variant(vid, status="active", subject=updated_subj, body_template=updated_body, allocation_percentage=50.0)
+                # Split allocation 50/50 with parent winner
+                winner_id = payload.get("parent_winner_id")
+                if winner_id:
+                    winner = await db.get_variant(winner_id)
+                    if winner:
+                        await db.update_variant_reinforcement(winner_id, winner.get("score", 0.0), 50.0)
+                execution_result = {"variant_c_activated": vid, "status": "active", "allocation_split": "50/50"}
 
         elif app_type == "reply_draft":
             item_id = payload.get("inbox_item_id")

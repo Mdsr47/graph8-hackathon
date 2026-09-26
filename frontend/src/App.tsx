@@ -105,11 +105,16 @@ export const App: React.FC = () => {
     setActivePage('campaign-detail');
   };
 
-  const handleCreateCampaign = async (name: string, icp: any) => {
+  const handleCreateCampaign = async (name: string, icp: any, refIds: string[] = [], dailyLimit: number = 50) => {
     const res = await fetch('/api/campaigns', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, icp_filters: icp }),
+      body: JSON.stringify({
+        name,
+        icp_filters: icp,
+        reference_email_ids: refIds,
+        daily_limit: dailyLimit,
+      }),
     });
     if (res.ok) {
       await fetchAllData();
@@ -220,6 +225,7 @@ export const App: React.FC = () => {
           {activePage === 'campaigns' && (
             <Campaigns
               campaigns={campaigns}
+              referenceEmails={referenceEmails}
               onSelectCampaign={handleSelectCampaign}
               onCreateCampaign={handleCreateCampaign}
               onToggleStatus={handleToggleStatus}

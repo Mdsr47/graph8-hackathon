@@ -16,20 +16,37 @@ class Graph8Client:
     Base URL: https://be.graph8.com/api/v1
     """
 
-    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, target_org_id: Optional[str] = None):
         self.api_key = api_key or settings.GRAPH8_API_KEY
         self.base_url = (base_url or settings.GRAPH8_BASE_URL).rstrip("/")
         self.webhook_secret = settings.GRAPH8_WEBHOOK_SECRET
+        self.target_org_id = target_org_id
         self.simulation_mode = settings.SIMULATION_MODE or not bool(self.api_key and self.api_key != "your_graph8_api_key_here")
 
-    def _headers(self) -> Dict[str, str]:
+    def _headers(self, target_org_id: Optional[str] = None) -> Dict[str, str]:
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json"
         }
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
+        org = target_org_id or self.target_org_id
+        if org:
+            headers["X-Target-Org-Id"] = org
         return headers
+
+    def create_client_org(self, name: str) -> dict:
+        """
+        TODO — UNCONFIRMED. No public 'create organization' endpoint was found
+        in graph8's docs as of this build. Before wiring this for real:
+        1. Check https://be.graph8.com/api/v1/docs (Swagger) for an
+           /organizations or /orgs POST endpoint.
+        2. If none exists, this has to happen manually / via graph8's agency
+           onboarding (contact graph8) rather than at signup time in code.
+        Until confirmed, this method raises NotImplementedError so it fails
+        loudly instead of silently doing the wrong thing.
+        """
+        raise NotImplementedError("verify org-creation endpoint with graph8 before wiring")
 
     async def _request(self, method: str, endpoint: str, json_data: Optional[Dict[str, Any]] = None, params: Optional[Dict[str, Any]] = None) -> Any:
         url = f"{self.base_url}{endpoint}"
@@ -164,7 +181,7 @@ class Graph8Client:
         ][:limit]
 
     # --- Search / Enrichment ---
-    async def search_contacts(self, filters: Dict[str, Any], limit: int = 25) -> List[Dict[str, Any]]:
+    async def search_contacts(self, filters: Dict[str, Any], limit: int = 50) -> List[Dict[str, Any]]:
         """POST /search/contacts"""
         if self.simulation_mode:
             return [

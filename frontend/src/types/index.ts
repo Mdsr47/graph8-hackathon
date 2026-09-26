@@ -8,6 +8,9 @@ export interface Campaign {
     company_size?: string;
     keywords?: string[];
   };
+  reference_email_ids?: string[];
+  daily_limit?: number;
+  sent_today?: number;
   created_at: string;
   contacts_count?: number;
   variants_count?: number;
@@ -51,6 +54,8 @@ export interface Variant {
   replies_count: number;
   positive_replies_count: number;
   meetings_count: number;
+  score?: number;
+  allocation_percentage?: number;
   created_at: string;
   killed_at?: string;
   open_rate?: number;
@@ -82,7 +87,7 @@ export interface AgentDecision {
 export interface Approval {
   id: string;
   decision_id?: string;
-  type: 'send_new_variant' | 'kill_variant' | 'voice_escalation' | 'reply_draft';
+  type: 'send_new_variant' | 'kill_variant' | 'send_replacement_variant' | 'voice_escalation' | 'reply_draft';
   payload: any;
   status: 'pending' | 'approved' | 'rejected';
   created_at: string;
