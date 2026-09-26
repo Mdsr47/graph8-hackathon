@@ -45,12 +45,19 @@ async def create_campaign(req: CampaignCreate, background_tasks: BackgroundTasks
         "status": "active",
         "icp_filters": icp_dict,
         "reference_email_ids": req.reference_email_ids or [],
-        "daily_limit": req.daily_limit or 50
+        "daily_limit": req.daily_limit or 50,
+        "target_contacts_limit": req.target_contacts_limit or 50
     })
 
     # Run LangGraph discovery & variant generation workflow in background
     background_tasks.add_task(run_campaign_initiation, camp["id"], icp_dict)
     return camp
+
+@router.post("/{campaign_id}/run-daily-batch")
+async def run_daily_batch(campaign_id: str):
+    from app.services.scheduler_service import scheduler_service
+    res = await scheduler_service.process_daily_batch(campaign_id)
+    return res
 
 @router.get("/{campaign_id}")
 async def get_campaign_detail(campaign_id: str):

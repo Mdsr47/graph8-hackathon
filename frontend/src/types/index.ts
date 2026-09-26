@@ -10,7 +10,9 @@ export interface Campaign {
   };
   reference_email_ids?: string[];
   daily_limit?: number;
+  target_contacts_limit?: number;
   sent_today?: number;
+  last_batch_run_at?: string;
   created_at: string;
   contacts_count?: number;
   variants_count?: number;
@@ -24,6 +26,7 @@ export interface Campaign {
 export interface Contact {
   id: string;
   campaign_id: string;
+  campaign_name?: string;
   graph8_contact_id?: string;
   name: string;
   email: string;
@@ -172,4 +175,72 @@ export interface OverviewStats {
   positive_sentiment: number;
   meetings_booked: number;
   pending_approvals: number;
+}
+
+export interface VariantMetrics {
+  sent: number;
+  delivered: number;
+  deliveryRate: number;
+  opens: number;
+  openRate: number;
+  clicks: number;
+  clickRate: number;
+  replies: number;
+  replyRate: number;
+  positiveReplies: number;
+  positiveReplyRate: number;
+  bounces: number;
+  bounceRate: number;
+  meetings: number;
+}
+
+export interface VariantAnalyticsItem {
+  variant_id: string;
+  campaign_id: string;
+  campaign_name: string;
+  channel: string;
+  subject: string;
+  body_template: string;
+  status: 'active' | 'killed' | 'draft';
+  score: number;
+  allocation_percentage: number;
+  metrics: VariantMetrics;
+}
+
+export interface AnalyticsSummary {
+  total_sends: number;
+  total_delivered: number;
+  delivery_rate: number;
+  total_opens: number;
+  open_rate: number;
+  total_clicks: number;
+  click_rate: number;
+  total_replies: number;
+  reply_rate: number;
+  total_positive: number;
+  positive_reply_rate: number;
+  total_bounces: number;
+  bounce_rate: number;
+  total_meetings: number;
+  total_prospects: number;
+  total_variants: number;
+}
+
+export interface AnalyticsData {
+  summary: AnalyticsSummary;
+  variants: VariantAnalyticsItem[];
+  intent_distribution: {
+    tier_1_hot: number;
+    tier_2_warm: number;
+    tier_3_mild: number;
+  };
+  campaigns: Array<{
+    id: string;
+    name: string;
+    status: string;
+    daily_limit: number;
+    target_contacts_limit: number;
+    sent_today: number;
+    last_batch_run_at?: string;
+  }>;
 }

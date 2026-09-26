@@ -2,6 +2,7 @@ import React from 'react';
 import {
   LayoutDashboard,
   Megaphone,
+  BarChart3,
   Users,
   Inbox,
   BrainCircuit,
@@ -28,6 +29,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const navItems = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
     { id: 'campaigns', label: 'Campaigns', icon: Megaphone },
+    { id: 'analytics', label: 'Variant Analytics', icon: BarChart3 },
     { id: 'prospects', label: 'Prospects & Signals', icon: Users },
     { id: 'inbox', label: 'Inbox & Replies', icon: Inbox, badge: inboxCount > 0 ? inboxCount : null, badgeColor: 'bg-emerald-500' },
     { id: 'decisions', label: 'Agent Decisions', icon: BrainCircuit },

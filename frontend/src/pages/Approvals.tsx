@@ -145,8 +145,21 @@ export const Approvals: React.FC<ApprovalsProps> = ({
                   )}
 
                   {a.type === 'send_new_variant' && (
-                    <div>
-                      <strong className="text-white">A/B Testing Strategy:</strong> {a.payload?.strategy}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <div><strong className="text-white">A/B Testing Strategy:</strong> {a.payload?.strategy}</div>
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-semibold">50/50 Traffic Split</span>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
+                        <div className="p-2.5 rounded-lg bg-slate-900/90 border border-indigo-500/20">
+                          <span className="font-bold text-indigo-300 block truncate">A: {a.payload?.variant_a?.subject}</span>
+                          <p className="text-slate-400 line-clamp-2 mt-1 leading-relaxed">{a.payload?.variant_a?.body_template}</p>
+                        </div>
+                        <div className="p-2.5 rounded-lg bg-slate-900/90 border border-purple-500/20">
+                          <span className="font-bold text-purple-300 block truncate">B: {a.payload?.variant_b?.subject}</span>
+                          <p className="text-slate-400 line-clamp-2 mt-1 leading-relaxed">{a.payload?.variant_b?.body_template}</p>
+                        </div>
+                      </div>
                     </div>
                   )}
 

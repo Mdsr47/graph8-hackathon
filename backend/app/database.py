@@ -47,6 +47,10 @@ class Database:
             except Exception:
                 pass
             try:
+                await db.execute("ALTER TABLE campaigns ADD COLUMN target_contacts_limit INTEGER DEFAULT 50")
+            except Exception:
+                pass
+            try:
                 await db.execute("ALTER TABLE campaigns ADD COLUMN sent_today INTEGER DEFAULT 0")
             except Exception:
                 pass
@@ -98,10 +102,19 @@ class Database:
                 await db.execute("ALTER TABLE variants ADD COLUMN allocation_percentage REAL DEFAULT 50.0")
             except Exception:
                 pass
+            try:
+                await db.execute("ALTER TABLE variants ADD COLUMN bounces_count INTEGER DEFAULT 0")
+            except Exception:
+                pass
+            try:
+                await db.execute("ALTER TABLE variants ADD COLUMN clicks_count INTEGER DEFAULT 0")
+            except Exception:
+                pass
 
             await db.execute("""
             CREATE TABLE IF NOT EXISTS events (
                 id TEXT PRIMARY KEY,
+                campaign_id TEXT,
                 contact_id TEXT,
                 variant_id TEXT,
                 event_type TEXT NOT NULL,
@@ -109,6 +122,20 @@ class Database:
                 sentiment TEXT,
                 created_at TEXT NOT NULL
             )""")
+
+            try:
+                await db.execute("ALTER TABLE events ADD COLUMN campaign_id TEXT")
+            except Exception:
+                pass
+
+            # Relational Indices for performance and structured querying
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_contacts_campaign ON contacts(campaign_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_contacts_status ON contacts(status)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_variants_campaign ON variants(campaign_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_events_campaign ON events(campaign_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_events_contact ON events(contact_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_events_variant ON events(variant_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_decisions_campaign ON agent_decisions(campaign_id)")
 
             await db.execute("""
             CREATE TABLE IF NOT EXISTS agent_decisions (
@@ -263,6 +290,7 @@ class Database:
                 "icp_filters": json.loads(r["icp_filters"] or "{}"),
                 "reference_email_ids": json.loads(r["reference_email_ids"] or "[]") if "reference_email_ids" in r.keys() and r["reference_email_ids"] else [],
                 "daily_limit": r["daily_limit"] if "daily_limit" in r.keys() else 50,
+                "target_contacts_limit": r["target_contacts_limit"] if "target_contacts_limit" in r.keys() else 50,
                 "sent_today": r["sent_today"] if "sent_today" in r.keys() else 0,
                 "last_batch_run_at": r["last_batch_run_at"] if "last_batch_run_at" in r.keys() else None,
                 "created_at": r["created_at"],
@@ -283,6 +311,7 @@ class Database:
                 "icp_filters": json.loads(r["icp_filters"] or "{}"),
                 "reference_email_ids": json.loads(r["reference_email_ids"] or "[]") if "reference_email_ids" in r.keys() and r["reference_email_ids"] else [],
                 "daily_limit": r["daily_limit"] if "daily_limit" in r.keys() else 50,
+                "target_contacts_limit": r["target_contacts_limit"] if "target_contacts_limit" in r.keys() else 50,
                 "sent_today": r["sent_today"] if "sent_today" in r.keys() else 0,
                 "last_batch_run_at": r["last_batch_run_at"] if "last_batch_run_at" in r.keys() else None,
                 "created_at": r["created_at"],
@@ -295,12 +324,13 @@ class Database:
         icp = json.dumps(data.get("icp_filters", {}))
         ref_ids = json.dumps(data.get("reference_email_ids", []))
         daily_lim = data.get("daily_limit", 50)
+        target_contacts = data.get("target_contacts_limit", 50)
         async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
             await db.execute(
                 """INSERT INTO campaigns 
-                (id, name, status, icp_filters, reference_email_ids, daily_limit, sent_today, created_at, org_id) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (cid, data["name"], data.get("status", "draft"), icp, ref_ids, daily_lim, 0, created_at, data.get("org_id"))
+                (id, name, status, icp_filters, reference_email_ids, daily_limit, target_contacts_limit, sent_today, created_at, org_id) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (cid, data["name"], data.get("status", "draft"), icp, ref_ids, daily_lim, target_contacts, 0, created_at, data.get("org_id"))
             )
             await db.commit()
         return await self.get_campaign(cid)
@@ -322,17 +352,48 @@ class Database:
             return True
 
     # --- CONTACTS ---
-    async def get_contacts(self, campaign_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def get_contacts(
+        self,
+        campaign_id: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        search: Optional[str] = None,
+        status: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
+            query = """
+                SELECT c.*, cmp.name as campaign_name 
+                FROM contacts c
+                LEFT JOIN campaigns cmp ON c.campaign_id = cmp.id
+                WHERE 1=1
+            """
+            params = []
             if campaign_id:
-                cursor = await db.execute("SELECT * FROM contacts WHERE campaign_id = ? ORDER BY intent_score DESC", (campaign_id,))
-            else:
-                cursor = await db.execute("SELECT * FROM contacts ORDER BY created_at DESC")
+                query += " AND c.campaign_id = ?"
+                params.append(campaign_id)
+            if status:
+                query += " AND c.status = ?"
+                params.append(status)
+            if search:
+                query += " AND (c.name LIKE ? OR c.email LIKE ? OR c.company LIKE ? OR c.title LIKE ?)"
+                pattern = f"%{search}%"
+                params.extend([pattern, pattern, pattern, pattern])
+
+            query += " ORDER BY c.intent_score DESC, c.created_at DESC"
+            if limit is not None:
+                query += " LIMIT ?"
+                params.append(limit)
+                if offset is not None:
+                    query += " OFFSET ?"
+                    params.append(offset)
+
+            cursor = await db.execute(query, params)
             rows = await cursor.fetchall()
             return [{
                 "id": r["id"],
                 "campaign_id": r["campaign_id"],
+                "campaign_name": r["campaign_name"] or "Outbound Campaign",
                 "graph8_contact_id": r["graph8_contact_id"],
                 "name": r["name"],
                 "email": r["email"],
@@ -344,6 +405,29 @@ class Database:
                 "enriched_data": json.loads(r["enriched_data"] or "{}"),
                 "created_at": r["created_at"]
             } for r in rows]
+
+    async def count_contacts(
+        self,
+        campaign_id: Optional[str] = None,
+        search: Optional[str] = None,
+        status: Optional[str] = None
+    ) -> int:
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            query = "SELECT COUNT(*) FROM contacts c WHERE 1=1"
+            params = []
+            if campaign_id:
+                query += " AND c.campaign_id = ?"
+                params.append(campaign_id)
+            if status:
+                query += " AND c.status = ?"
+                params.append(status)
+            if search:
+                query += " AND (c.name LIKE ? OR c.email LIKE ? OR c.company LIKE ? OR c.title LIKE ?)"
+                pattern = f"%{search}%"
+                params.extend([pattern, pattern, pattern, pattern])
+            cursor = await db.execute(query, params)
+            row = await cursor.fetchone()
+            return row[0] if row else 0
 
     async def create_contact(self, data: Dict[str, Any]) -> Dict[str, Any]:
         cid = data.get("id") or str(uuid.uuid4())
@@ -400,6 +484,8 @@ class Database:
                 "replies_count": r["replies_count"],
                 "positive_replies_count": r["positive_replies_count"],
                 "meetings_count": r["meetings_count"],
+                "bounces_count": r["bounces_count"] if "bounces_count" in r.keys() and r["bounces_count"] else 0,
+                "clicks_count": r["clicks_count"] if "clicks_count" in r.keys() and r["clicks_count"] else 0,
                 "score": r["score"] if "score" in r.keys() else 0.0,
                 "allocation_percentage": r["allocation_percentage"] if "allocation_percentage" in r.keys() else 50.0,
                 "created_at": r["created_at"],
@@ -425,6 +511,8 @@ class Database:
                 "replies_count": r["replies_count"],
                 "positive_replies_count": r["positive_replies_count"],
                 "meetings_count": r["meetings_count"],
+                "bounces_count": r["bounces_count"] if "bounces_count" in r.keys() and r["bounces_count"] else 0,
+                "clicks_count": r["clicks_count"] if "clicks_count" in r.keys() and r["clicks_count"] else 0,
                 "score": r["score"] if "score" in r.keys() else 0.0,
                 "allocation_percentage": r["allocation_percentage"] if "allocation_percentage" in r.keys() else 50.0,
                 "created_at": r["created_at"],
@@ -439,11 +527,12 @@ class Database:
         async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
             await db.execute(
                 """INSERT INTO variants 
-                (id, campaign_id, channel, subject, body_template, status, sends_count, opens_count, replies_count, positive_replies_count, meetings_count, score, allocation_percentage, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (id, campaign_id, channel, subject, body_template, status, sends_count, opens_count, replies_count, positive_replies_count, meetings_count, bounces_count, clicks_count, score, allocation_percentage, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (vid, data["campaign_id"], data.get("channel", "email"), data["subject"], data["body_template"],
                  data.get("status", "active"), data.get("sends_count", 0), data.get("opens_count", 0),
-                 data.get("replies_count", 0), data.get("positive_replies_count", 0), data.get("meetings_count", 0), score, alloc, created_at)
+                 data.get("replies_count", 0), data.get("positive_replies_count", 0), data.get("meetings_count", 0),
+                 data.get("bounces_count", 0), data.get("clicks_count", 0), score, alloc, created_at)
             )
             await db.commit()
         data["id"] = vid
@@ -460,7 +549,7 @@ class Database:
             await db.commit()
 
     async def increment_variant_metric(self, variant_id: str, metric: str, amount: int = 1):
-        allowed_metrics = ["sends_count", "opens_count", "replies_count", "positive_replies_count", "meetings_count"]
+        allowed_metrics = ["sends_count", "opens_count", "replies_count", "positive_replies_count", "meetings_count", "bounces_count", "clicks_count"]
         if metric not in allowed_metrics:
             return
         async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
@@ -495,6 +584,139 @@ class Database:
         async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
             await db.execute("UPDATE variants SET status = 'killed', killed_at = ? WHERE id = ?", (now, variant_id))
             await db.commit()
+
+    async def get_analytics_data(self, campaign_id: Optional[str] = None) -> Dict[str, Any]:
+        """Provides full variant analytics, open/reply/bounce metrics, and intent breakdown."""
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            db.row_factory = aiosqlite.Row
+
+            if campaign_id:
+                c_cursor = await db.execute("SELECT * FROM campaigns WHERE id = ?", (campaign_id,))
+            else:
+                c_cursor = await db.execute("SELECT * FROM campaigns ORDER BY created_at DESC")
+            camp_rows = await c_cursor.fetchall()
+
+            if campaign_id:
+                v_cursor = await db.execute(
+                    "SELECT v.*, c.name as campaign_name FROM variants v LEFT JOIN campaigns c ON v.campaign_id = c.id WHERE v.campaign_id = ? ORDER BY v.created_at ASC",
+                    (campaign_id,)
+                )
+            else:
+                v_cursor = await db.execute(
+                    "SELECT v.*, c.name as campaign_name FROM variants v LEFT JOIN campaigns c ON v.campaign_id = c.id ORDER BY v.created_at DESC"
+                )
+            var_rows = await v_cursor.fetchall()
+
+            if campaign_id:
+                cnt_cursor = await db.execute("SELECT intent_score, status FROM contacts WHERE campaign_id = ?", (campaign_id,))
+            else:
+                cnt_cursor = await db.execute("SELECT intent_score, status FROM contacts")
+            contacts_data = await cnt_cursor.fetchall()
+
+        variant_analytics = []
+        tot_sends = 0
+        tot_opens = 0
+        tot_replies = 0
+        tot_positive = 0
+        tot_bounces = 0
+        tot_clicks = 0
+        tot_meetings = 0
+
+        for r in var_rows:
+            sends = r["sends_count"] or 0
+            opens = r["opens_count"] or 0
+            replies = r["replies_count"] or 0
+            pos = r["positive_replies_count"] or 0
+            bounces = r["bounces_count"] if "bounces_count" in r.keys() and r["bounces_count"] else 0
+            clicks = r["clicks_count"] if "clicks_count" in r.keys() and r["clicks_count"] else 0
+            meetings = r["meetings_count"] or 0
+
+            delivered = max(0, sends - bounces)
+            deliv_rate = round((delivered / sends) * 100, 1) if sends > 0 else 100.0
+            open_rate = round((opens / sends) * 100, 1) if sends > 0 else 0.0
+            reply_rate = round((replies / sends) * 100, 1) if sends > 0 else 0.0
+            pos_rate = round((pos / sends) * 100, 1) if sends > 0 else 0.0
+            bounce_rate = round((bounces / sends) * 100, 1) if sends > 0 else 0.0
+            click_rate = round((clicks / sends) * 100, 1) if sends > 0 else 0.0
+
+            tot_sends += sends
+            tot_opens += opens
+            tot_replies += replies
+            tot_positive += pos
+            tot_bounces += bounces
+            tot_clicks += clicks
+            tot_meetings += meetings
+
+            variant_analytics.append({
+                "variant_id": r["id"],
+                "campaign_id": r["campaign_id"],
+                "campaign_name": r["campaign_name"] or "Campaign",
+                "channel": r["channel"],
+                "subject": r["subject"],
+                "body_template": r["body_template"],
+                "status": r["status"],
+                "score": r["score"] if "score" in r.keys() else 0.0,
+                "allocation_percentage": r["allocation_percentage"] if "allocation_percentage" in r.keys() else 50.0,
+                "metrics": {
+                    "sent": sends,
+                    "delivered": delivered,
+                    "deliveryRate": deliv_rate,
+                    "opens": opens,
+                    "openRate": open_rate,
+                    "clicks": clicks,
+                    "clickRate": click_rate,
+                    "replies": replies,
+                    "replyRate": reply_rate,
+                    "positiveReplies": pos,
+                    "positiveReplyRate": pos_rate,
+                    "bounces": bounces,
+                    "bounceRate": bounce_rate,
+                    "meetings": meetings
+                }
+            })
+
+        intent_buckets = {"tier_1_hot": 0, "tier_2_warm": 0, "tier_3_mild": 0}
+        for c in contacts_data:
+            score = c["intent_score"] or 0
+            if score >= 90:
+                intent_buckets["tier_1_hot"] += 1
+            elif score >= 80:
+                intent_buckets["tier_2_warm"] += 1
+            else:
+                intent_buckets["tier_3_mild"] += 1
+
+        overall_deliv = max(0, tot_sends - tot_bounces)
+        return {
+            "summary": {
+                "total_sends": tot_sends,
+                "total_delivered": overall_deliv,
+                "delivery_rate": round((overall_deliv / tot_sends) * 100, 1) if tot_sends > 0 else 100.0,
+                "total_opens": tot_opens,
+                "open_rate": round((tot_opens / tot_sends) * 100, 1) if tot_sends > 0 else 0.0,
+                "total_clicks": tot_clicks,
+                "click_rate": round((tot_clicks / tot_sends) * 100, 1) if tot_sends > 0 else 0.0,
+                "total_replies": tot_replies,
+                "reply_rate": round((tot_replies / tot_sends) * 100, 1) if tot_sends > 0 else 0.0,
+                "total_positive": tot_positive,
+                "positive_reply_rate": round((tot_positive / tot_sends) * 100, 1) if tot_sends > 0 else 0.0,
+                "total_bounces": tot_bounces,
+                "bounce_rate": round((tot_bounces / tot_sends) * 100, 1) if tot_sends > 0 else 0.0,
+                "total_meetings": tot_meetings,
+                "total_prospects": len(contacts_data),
+                "total_variants": len(variant_analytics)
+            },
+            "variants": variant_analytics,
+            "intent_distribution": intent_buckets,
+            "campaigns": [{
+                "id": c["id"],
+                "name": c["name"],
+                "status": c["status"],
+                "daily_limit": c["daily_limit"] if "daily_limit" in c.keys() else 50,
+                "target_contacts_limit": c["target_contacts_limit"] if "target_contacts_limit" in c.keys() else 50,
+                "sent_today": c["sent_today"] if "sent_today" in c.keys() else 0,
+                "last_batch_run_at": c["last_batch_run_at"] if "last_batch_run_at" in c.keys() else None
+            } for c in camp_rows]
+        }
 
     # --- EVENTS ---
     async def get_events(self, limit: int = 50) -> List[Dict[str, Any]]:

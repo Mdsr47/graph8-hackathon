@@ -1,5 +1,6 @@
 import logging
 import json
+import asyncio
 from typing import Dict, Any, List, Optional
 from app.agent.state import AgentState
 from app.adapters.graph8_client import graph8_client
@@ -36,18 +37,18 @@ def compute_variant_score(variant: Dict[str, Any], prior_weight: float = 3.0, pr
     return round(smoothed_score, 4)
 
 async def signal_node(state: AgentState) -> AgentState:
-    """Pulls high-intent accounts and discovers prospects in batches of 50."""
+    """Pulls high-intent accounts and discovers prospects according to requested cohort limit."""
     campaign_id = state["campaign_id"]
-    icp = state.get("icp_filters", {})
-    logger.info(f"[signal_node] Discovering intent signals for campaign {campaign_id}")
+    campaign = await db.get_campaign(campaign_id) or {}
+    target_limit = campaign.get("target_contacts_limit", 50)
 
     # Fetch intent keywords
     kw_resp = await graph8_client.list_intent_keywords(page=1, limit=10)
     keywords = kw_resp.get("keywords", [])
     keyword_id = keywords[0]["id"] if keywords else "kw_01"
 
-    # Search prospects up to batch size 50
-    g8_contacts = await graph8_client.get_contacts_for_keyword(keyword_id, limit=50)
+    # Search prospects up to batch size target_limit
+    g8_contacts = await graph8_client.get_contacts_for_keyword(keyword_id, limit=target_limit)
     
     saved_contacts = []
     for c in g8_contacts:
@@ -66,7 +67,7 @@ async def signal_node(state: AgentState) -> AgentState:
     decision = await db.create_decision({
         "campaign_id": campaign_id,
         "decision_type": "discover_signals",
-        "reasoning": f"Identified {len(saved_contacts)} high-intent decision makers from graph8 intent signals matching ICP criteria (batch limit: 50).",
+        "reasoning": f"Identified and permanently stored {len(saved_contacts)} high-intent decision makers from graph8 intent signals matching ICP criteria (total requested: {target_limit}).",
         "before_state": {"contacts_count": 0},
         "after_state": {"contacts_count": len(saved_contacts), "sample_intent_score": 92},
         "requires_approval": False
@@ -85,13 +86,11 @@ async def enrichment_node(state: AgentState) -> AgentState:
     contacts = state.get("contacts", [])
     logger.info(f"[enrichment_node] Enriching {len(contacts)} contacts for campaign {campaign_id}")
 
-    enriched_contacts = []
-    for c in contacts:
+    async def _enrich_contact(c: Dict[str, Any]) -> Dict[str, Any]:
         enrich_data = await graph8_client.enrich_person(c["email"])
-        # Ensure complete structured intelligence
         company = c.get("company", "Enterprise Account")
         name_slug = c.get("name", "leader").lower().replace(" ", "-")
-        enrich_data = {
+        structured_enrichment = {
             "verified": True,
             "linkedin_url": enrich_data.get("linkedin_url") or f"https://linkedin.com/in/{name_slug}",
             "tech_stack": enrich_data.get("tech_stack") or ["HubSpot", "Salesforce", "Outreach", "Segment", "Apollo"],
@@ -104,9 +103,11 @@ async def enrichment_node(state: AgentState) -> AgentState:
             "company_size": "100-500 employees",
             "annual_revenue": "$25M - $60M ARR"
         }
-        c["enriched_data"] = enrich_data
-        await db.update_contact_enrichment(c["id"], enrich_data)
-        enriched_contacts.append(c)
+        c["enriched_data"] = structured_enrichment
+        await db.update_contact_enrichment(c["id"], structured_enrichment)
+        return c
+
+    enriched_contacts = list(await asyncio.gather(*[_enrich_contact(c) for c in contacts]))
 
     decision = await db.create_decision({
         "campaign_id": campaign_id,
@@ -243,12 +244,24 @@ async def executor_node(state: AgentState) -> AgentState:
         custom_subj = variant["subject"].replace("{company}", contact.get("company", "your company")).replace("{name}", contact.get("name", "there"))
         custom_body = variant["body_template"].replace("{company}", contact.get("company", "your company")).replace("{name}", contact.get("name", "there")).replace("{title}", contact.get("title", "leader"))
 
+        # Sync prospect to graph8 audience tag (per Graph8 reference spec)
+        await graph8_client.sync_prospect({
+            "id": contact["id"],
+            "email": contact.get("email"),
+            "name": contact.get("name"),
+            "company": contact.get("company"),
+            "title": contact.get("title"),
+            "tags": ["Daily-Dashboard-Sync", f"camp-{campaign_id[:8]}"],
+            "status": "active"
+        })
+
         # Enroll in sequence
         await graph8_client.add_contacts_to_sequence("seq_auto_01", contact["id"], custom_subj, custom_body)
         await db.update_contact_status(contact["id"], "enrolled", step=1)
         await db.increment_variant_metric(variant["id"], "sends_count", 1)
 
         event = await db.create_event({
+            "campaign_id": campaign_id,
             "contact_id": contact["id"],
             "variant_id": variant["id"],
             "event_type": "sent",

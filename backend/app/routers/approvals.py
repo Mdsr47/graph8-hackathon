@@ -29,8 +29,22 @@ async def resolve_approval(approval_id: str, req: ApprovalResolveRequest):
     execution_result = {}
     if req.status == "approved":
         if app_type == "send_new_variant":
-            # Approved first send: enroll sequence
-            execution_result = {"action": "variants_activated", "status": "active"}
+            # Approved first send: update variants with any human edits
+            va = payload.get("variant_a") or {}
+            vb = payload.get("variant_b") or {}
+            if va.get("id"):
+                await db.update_variant(va["id"], subject=va.get("subject"), body_template=va.get("body_template"))
+            if vb.get("id"):
+                await db.update_variant(vb["id"], subject=vb.get("subject"), body_template=vb.get("body_template"))
+
+            # Dispatch first daily cohort into sequence
+            camp_id = payload.get("campaign_id")
+            if camp_id:
+                from app.services.scheduler_service import scheduler_service
+                batch_res = await scheduler_service.process_daily_batch(camp_id)
+                execution_result = {"action": "variants_activated", "status": "active", "batch_dispatch": batch_res}
+            else:
+                execution_result = {"action": "variants_activated", "status": "active"}
 
         elif app_type == "kill_variant":
             kill_vid = payload.get("kill_variant_id")

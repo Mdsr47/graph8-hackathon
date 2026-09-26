@@ -17,8 +17,10 @@ from app.routers import (
     settings as settings_router,
     webhooks,
     events,
-    mailboxes
+    mailboxes,
+    analytics
 )
+from app.services.scheduler_service import scheduler_service
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("main")
@@ -27,8 +29,10 @@ logger = logging.getLogger("main")
 async def lifespan(app: FastAPI):
     logger.info("Initializing graph8 Self-Healing Outbound Agent...")
     await db.init_db()
-    logger.info("Database initialized successfully.")
+    await scheduler_service.start()
+    logger.info("Database and automated daily scheduler initialized successfully.")
     yield
+    await scheduler_service.stop()
     logger.info("Shutting down agent backend.")
 
 app = FastAPI(
@@ -59,6 +63,7 @@ app.include_router(settings_router.router)
 app.include_router(webhooks.router)
 app.include_router(events.router)
 app.include_router(mailboxes.router)
+app.include_router(analytics.router)
 
 @app.get("/api/stats")
 async def get_overview_stats():

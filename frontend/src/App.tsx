@@ -8,6 +8,7 @@ import { ApprovalModal } from './components/ApprovalModal';
 import { Overview } from './pages/Overview';
 import { Campaigns } from './pages/Campaigns';
 import { CampaignDetail } from './pages/CampaignDetail';
+import { Analytics } from './pages/Analytics';
 import { Prospects } from './pages/Prospects';
 import { Inbox } from './pages/Inbox';
 import { Decisions } from './pages/Decisions';
@@ -109,7 +110,7 @@ export const App: React.FC = () => {
     setActivePage('campaign-detail');
   };
 
-  const handleCreateCampaign = async (name: string, icp: any, refIds: string[] = [], dailyLimit: number = 50) => {
+  const handleCreateCampaign = async (name: string, icp: any, refIds: string[] = [], dailyLimit: number = 25, totalProspects: number = 50) => {
     const res = await fetch('/api/campaigns', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -118,11 +119,19 @@ export const App: React.FC = () => {
         icp_filters: icp,
         reference_email_ids: refIds,
         daily_limit: dailyLimit,
+        target_contacts_limit: totalProspects,
       }),
     });
     if (res.ok) {
       await fetchAllData();
       setActivePage('campaigns');
+    }
+  };
+
+  const handlePushDailyBatch = async (campaignId: string) => {
+    const res = await fetch(`/api/campaigns/${campaignId}/run-daily-batch`, { method: 'POST' });
+    if (res.ok) {
+      await fetchAllData();
     }
   };
 
@@ -259,6 +268,7 @@ export const App: React.FC = () => {
               onSelectCampaign={handleSelectCampaign}
               onCreateCampaign={handleCreateCampaign}
               onToggleStatus={handleToggleStatus}
+              onPushDailyBatch={handlePushDailyBatch}
             />
           )}
 
@@ -267,6 +277,10 @@ export const App: React.FC = () => {
               campaignId={selectedCampaignId}
               onBack={() => setActivePage('campaigns')}
             />
+          )}
+
+          {activePage === 'analytics' && (
+            <Analytics />
           )}
 
           {activePage === 'prospects' && (
