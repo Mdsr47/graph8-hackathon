@@ -1,0 +1,498 @@
+# MASTER PROMPT — graph8 Self-Healing Outbound Agent (for Antigravity)
+
+> **Read this note before the spec.** This is Sections 5–16 of your original
+> draft, corrected against graph8's actual public docs (as of Sep 2026) and
+> with two structural changes: Section 6 (graph8 integration) now has real
+> confirmed endpoints instead of guesses, and the email/Gmail plan has been
+> replaced with graph8's own native mailbox feature instead of a custom
+> Gmail-OAuth-via-n8n build. Sections 1–4 (your problem statement / goals /
+> judging criteria) are untouched — paste them above this block before
+> handing the whole thing to Antigravity.
+>
+> **What changed and why, in one paragraph each:**
+> - The `@graph8/contact-card`, `@graph8/sequence-builder`,
+>   `@graph8/calendar`, `@graph8/agent-chat` npm packages referenced in your
+>   draft **do not appear to exist** — I could not find them on npm, in
+>   graph8's docs nav, or anywhere else. Don't have Antigravity go looking
+>   for them; Section 11 below tells it to hand-build the frontend instead.
+> - graph8 already has a **native Gmail/Outlook OAuth mailbox connector**
+>   (Settings → Mailboxes) with built-in warmup and sending limits, and an
+>   **AI Inbox** that ingests replies from it. Building your own
+>   Gmail-credentials-in-a-form + n8n-Gmail-node system would duplicate this,
+>   and worse, it implies asking users for raw Gmail passwords, which Google
+>   simply does not allow (Gmail requires OAuth, full stop — never design a
+>   form that asks for an email password). New Section 6c below gives the
+>   correct architecture.
+> - graph8's real n8n integration is **MCP-based and read-oriented**
+>   (list/get/search campaigns, companies, deals, intelligence) — it is not
+>   an email pipe. Section 15 is corrected to use it for what it's
+>   actually for.
+
+---
+
+## 5. DATABASE — SUPABASE (Postgres)
+
+*(unchanged from your draft)*
+
+Use Supabase (Postgres + built-in auth, even though auth is unused for now —
+wire a single default user so switching to real multi-user auth later is a
+config change, not a rewrite). Tables:
+
+- **campaigns**: id, name, status (draft/active/paused/completed), icp_filters (jsonb), created_at, org_id (nullable, unused)
+- **contacts**: id, campaign_id (fk), graph8_contact_id, name, email, title, company, intent_score, current_step, status (enum: new/enrolled/replied/bounced/meeting_booked), enriched_data (jsonb), created_at
+- **variants**: id, campaign_id (fk), channel (enum: email — extendable later), subject, body_template, status (active/killed/draft), sends_count, opens_count, replies_count, positive_replies_count, meetings_count, created_at, killed_at
+- **events**: id, contact_id (fk), variant_id (fk), event_type (sent/opened/replied/bounced/meeting_booked), raw_payload (jsonb), sentiment (nullable enum: positive/neutral/negative), created_at — populated by the webhook receiver, this is the feedback loop's raw fuel
+- **agent_decisions**: id, campaign_id (fk), decision_type (reallocate/kill_variant/generate_variant/escalate_voice), reasoning (text), before_state (jsonb), after_state (jsonb), requires_approval (bool), created_at
+- **approvals**: id, decision_id (fk, nullable), type (send_new_variant/kill_variant/voice_escalation/reply_draft), payload (jsonb), status (pending/approved/rejected), created_at, resolved_at
+- **reference_emails**: id, subject, body, style_notes (text, optional), created_at
+- **settings**: key (text, pk), value (text) — non-secret UI-visible config only. Real API keys stay in `.env`.
+- **mailbox_status** *(new — see Section 6c)*: id, provider (gmail/outlook/smtp), graph8_mailbox_id, connected_at, status (active/warming_up/error) — mirrors what graph8 reports about the connected mailbox, purely for the Settings page to display; graph8 owns the actual credentials, we never store them.
+
+---
+
+## 6. graph8 INTEGRATION — ADAPTER PATTERN (CORRECTED, VERIFIED ENDPOINTS)
+
+Build `backend/app/adapters/graph8_client.py` as a single class,
+`Graph8Client`, exactly as your draft specified — one method per operation,
+HTTP details never scattered into business logic. The difference from your
+draft: these endpoints are now confirmed against graph8's public developer
+docs (`docs.graph8.com/developers/`) rather than assumed, so Antigravity can
+build directly instead of guessing.
+
+**Base URL:** `https://be.graph8.com/api/v1`
+**Auth:** `Authorization: Bearer <GRAPH8_API_KEY>` header on every request.
+An `X-Org-Id` header exists for cross-org service tokens but is not needed
+for a normal single-org API key — the org is resolved from the key itself.
+**Interactive Swagger** (needs a logged-in graph8 account to view):
+`https://be.graph8.com/api/v1/docs` — Antigravity should treat this as the
+source of truth if any method below throws a 404/422 during build; a couple
+of request-body field names are marked "verify" below because the public
+doc excerpts didn't spell out every field.
+
+```python
+class Graph8Client:
+    # --- Intent / Signals (confirmed: docs.graph8.com/developers/intent-signals/) ---
+    def get_intent_stats(self) -> dict: ...
+    # GET /intent/stats -> {total_keywords, total_pages, total_visitors_30d, total_companies_30d}
+
+    def list_intent_keywords(self, page: int = 1, limit: int = 25, search: str | None = None) -> dict: ...
+    # POST /intent/keywords/list
+
+    def create_intent_keyword_from_domain(self, domain: str) -> dict: ...
+    # POST /intent/keywords/create-from-domain  {"domain": "..."}
+
+    def get_companies_for_keyword(self, keyword_id: str, limit: int = 50, date_from: str | None = None) -> list[dict]: ...
+    # POST /intent/keywords/{keyword_id}/companies
+
+    def get_contacts_for_keyword(self, keyword_id: str, limit: int = 50) -> list[dict]: ...
+    # POST /intent/keywords/{keyword_id}/contacts
+
+    # --- Search / Enrichment (pattern confirmed, exact filter field names: verify against Swagger) ---
+    def search_contacts(self, filters: dict, limit: int = 25) -> list[dict]: ...
+    # POST /search/contacts   e.g. {"domain": "...", "titles": ["VP Sales","CTO"], "limit": 25}
+
+    def enrich_person(self, email: str) -> dict: ...
+    # verify exact path under /enrichment/* in Swagger before wiring
+
+    # --- Contacts CRUD (confirmed: docs.graph8.com/developers/contacts/, api-reference) ---
+    def list_contacts(self, params: dict | None = None) -> list[dict]: ...
+    # GET /contacts
+    def create_contacts(self, contacts: list[dict]) -> dict: ...
+    # POST /contacts
+    def get_contact(self, contact_id: str) -> dict: ...
+    # GET /contacts/{contact_id}
+    def get_contact_signals(self, contact_id: str) -> dict: ...
+    # GET /contacts/{contact_id}/signals
+
+    # --- Sequences (confirmed pattern) ---
+    def add_contacts_to_sequence(self, sequence_id: str, contact_id: str, custom_subject: str | None = None, custom_body: str | None = None) -> dict: ...
+    # POST /sequences/{sequence_id}/contacts
+    # NOTE: your draft called this `enroll_contacts_in_sequence` — there is
+    # no standalone "enroll" method in graph8's docs; this add-to-sequence
+    # call IS the enroll operation, keep the name but know the underlying
+    # verb graph8 uses is "add", not "enroll", so Swagger search for it
+    # under that word if you need to double check.
+
+    # --- Inbox (tool names confirmed via MCP skill library; exact REST
+    #     paths were NOT spelled out in the fetched doc excerpts — VERIFY
+    #     in Swagger under "Inbox" before wiring the webhook receiver) ---
+    def list_inbox(self, status: str = "unhandled", limit: int = 20) -> list[dict]: ...
+    # likely GET /inbox or POST /inbox/list — confirm
+    def get_reply(self, reply_id: str) -> dict: ...
+    def send_reply(self, reply_id: str, text: str) -> dict: ...
+    def tag_reply(self, reply_id: str, tag: str) -> dict: ...
+
+    # --- Webhooks (confirmed resource exists: docs.graph8.com/developers/webhooks/) ---
+    def register_webhook(self, url: str, events: list[str]) -> dict: ...
+    def verify_webhook_signature(self, payload: bytes, signature: str) -> bool: ...
+    # exact signature scheme (HMAC header name, algo): verify in the
+    # Webhooks doc page before implementing verify_webhook_signature —
+    # do not skip signature verification even under hackathon time pressure,
+    # an unverified webhook receiver is a real, exploitable hole.
+
+    # --- Mailboxes (new — needed for Section 6c, NOT in your original draft) ---
+    def list_mailboxes(self) -> list[dict]: ...
+    # GET /mailboxes  — used by the Settings page to show connection status
+    # graph8 owns Gmail OAuth entirely (Settings > Mailboxes in the graph8
+    # UI) — this client method only ever READS status, never handles
+    # credentials.
+
+    # --- Voice — stretch goal only, see Section 10 ---
+    def trigger_voice_call(self, contact_id: str, script_context: dict) -> dict: ...
+```
+
+Every method routes through one `_request()` helper: centralized error
+handling, simple exponential-backoff retry (max 3 tries), and logging of
+every graph8 call + response (to an internal debug log, not necessarily the
+DB) so the team can debug live during the hackathon.
+
+Use `httpx` (async) directly from FastAPI — do **not** depend on the
+Node-only `@graph8/sdk` from the Python backend (confirmed: that SDK is
+JS/TypeScript-only per graph8's own docs). If the team decides Node is
+easier specifically for the graph8 calls, that's a valid alternative — flag
+it as a decision point in the README rather than silently choosing one.
+
+### 6b. FRONTEND — NO OFFICIAL graph8 COMPONENT LIBRARY (CORRECTED)
+
+Your draft referenced `@graph8/contact-card`, `@graph8/sequence-builder`,
+`@graph8/calendar`, `@graph8/agent-chat` as drop-in npm UI components.
+**These could not be verified to exist** — searches of npm and graph8's own
+docs site turned up nothing. Do not have Antigravity spend hackathon time
+looking for them. Build the frontend plain: React + Tailwind (or
+`shadcn/ui` for fast, clean-looking form/table/card primitives) per the
+page spec in Section 11. If a real graph8 component library does exist
+under some other package name, it would need to be confirmed by browsing
+`npmjs.com/org/graph8` directly at kickoff — but plan and build assuming it
+does not, so nothing blocks on it.
+
+### 6c. EMAIL / GMAIL — USE graph8's NATIVE MAILBOX CONNECTOR, NOT A CUSTOM ONE (NEW SECTION, REPLACES THE "user enters Gmail creds → n8n connects" IDEA)
+
+**Short answer to "is this possible": the idea as described (user types
+their Gmail credentials into our frontend, our backend/n8n uses them to
+connect to Gmail) is not something to build — Gmail does not accept
+username/password login for third-party apps at all, only OAuth consent.
+Any form asking for a Gmail password would be asking users to hand over
+their actual Google account password to a hackathon app, which Google's
+own policies block and which is a real security problem regardless.**
+
+The good news: graph8 already solved exactly this, natively, with OAuth:
+
+1. **Connecting the mailbox** (confirmed: `docs.graph8.com/settings/mailboxes`)
+   happens entirely inside graph8's own UI: Settings → Mailboxes → Connect
+   Mailbox → Gmail → the user signs into Google and clicks Allow → done.
+   graph8 handles the OAuth flow, token storage, sending-limit detection,
+   and optional warmup entirely on its side. **We never see or store a
+   password or an OAuth token.**
+2. **Our app's job** is just to point the user at that flow and then read
+   the result:
+   - On our **Settings page**, show a "Connect your inbox" card. Since
+     graph8 doesn't expose a way to embed their OAuth flow inside a
+     third-party app's own UI (no public "connect-link" endpoint was found
+     in the docs, unlike some competitors), the honest, buildable version
+     for a hackathon is: a button that says "Open graph8 Mailbox Settings"
+     linking straight to the user's `app.graph8.com` Settings → Mailboxes
+     page (new tab). Below it, poll `GET /mailboxes` via `Graph8Client.list_mailboxes()`
+     and show a live "Connected ✅ / Not connected" status pulled from
+     graph8 — this is the `mailbox_status` table from Section 5.
+   - Once connected, replies land in graph8's own **AI Inbox** automatically
+     — nothing else to build for ingestion.
+3. **Getting that data into OUR dashboard in real time** is what
+   `webhook_receiver` (Section 13) is for: register a graph8 webhook for
+   inbox/reply events (`Graph8Client.register_webhook()`), and every new
+   reply graph8 receives on the connected Gmail mailbox fires our
+   `/webhooks/graph8` endpoint → writes to `events` → broadcasts over SSE
+   → shows up live on the Inbox / Replies page (Section 11, page 5). This
+   is the exact same webhook path Section 13 already describes — email
+   ingestion doesn't need a separate system, it's the same feedback loop
+   the rest of the app already runs on.
+4. **If you still want an n8n layer for extra visual flair for judges**,
+   build it as described in the corrected Section 15: n8n receives the
+   *same* graph8 webhook (or polls `GET /inbox` on a Cron node) and relays
+   it onward (e.g., posts a Slack notification, or forwards to our
+   backend). n8n in this design never touches Gmail directly and never
+   handles user credentials — it's a relay/automation layer sitting on top
+   of graph8's already-connected mailbox, which is both safer and far less
+   work than standing up n8n's own Gmail OAuth node per end-user.
+
+This gives you the real-time "emails show up on the dashboard the moment
+the user connects their inbox" experience you wanted, without building or
+being responsible for a second OAuth system.
+
+---
+
+## 7. LLM CLIENT — PROVIDER-SWAPPABLE BY DESIGN
+
+*(unchanged from your draft)*
+
+Use Groq for MVP (fast, free tier, good for live demo latency). Build
+`backend/app/llm/llm_client.py` using the OpenAI-compatible client
+interface, because Groq's API is OpenAI-compatible.
+
+```python
+from openai import OpenAI
+import os
+
+class LLMClient:
+    def __init__(self):
+        self.client = OpenAI(
+            base_url=os.environ.get("LLM_BASE_URL", "https://api.groq.com/openai/v1"),
+            api_key=os.environ.get("LLM_API_KEY"),
+        )
+        self.model = os.environ.get("LLM_MODEL", "llama-3.3-70b-versatile")
+
+    def generate(self, messages: list[dict], **kwargs) -> str:
+        resp = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            **kwargs,
+        )
+        return resp.choices[0].message.content
+```
+
+To switch providers later: change `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`
+in `.env` only. Never reference "groq" directly anywhere else in the
+codebase — always go through `LLMClient`. (If the team ever wants native
+Anthropic API instead of an OpenAI-compatible endpoint, that needs a small
+adapter change since Anthropic's message schema differs slightly — flag in
+a code comment, don't silently break it.)
+
+---
+
+## 8. LANGGRAPH WORKFLOW (the core loop)
+
+*(unchanged from your draft — still correct)*
+
+Build as a LangGraph `StateGraph` with a real cyclical edge (not a straight
+DAG) — make it structurally visible in the code.
+
+**Nodes:**
+1. `signal_node` — pulls high-intent accounts from graph8 signals
+   (`Graph8Client.list_intent_keywords` → `get_companies_for_keyword`) for
+   the campaign's ICP filter.
+2. `enrichment_node` — enriches each account/contact via
+   `Graph8Client.search_contacts` / `enrich_person`.
+3. `variant_generator_node` — generates 2 pitch variants (subject + body)
+   per segment using `LLMClient`, using saved `reference_emails` as
+   few-shot examples. Tag each variant with a generation reason.
+4. `executor_node` — enrolls contacts into a graph8 sequence per variant
+   via `Graph8Client.add_contacts_to_sequence`, splitting the segment
+   evenly across active variants.
+5. `feedback_node` — triggered by incoming webhook events (not polling).
+   Updates `events`, recalculates each variant's live metrics.
+6. `reallocation_node` — the reinforcement step. Require a minimum sample
+   size (e.g. 5 sends) before any kill/reallocate decision. Every
+   "kill_variant" or "generate_variant" decision writes an `approvals` row
+   with `requires_approval=True` **before** it takes effect (Section 9).
+7. `voice_escalation_node` — stretch goal, Section 10.
+
+**State schema** (`state.py`): campaign_id, segment, contacts[], variants[],
+events[], last_decision, pending_approvals[].
+
+Use LangGraph checkpointing (Postgres checkpointer against Supabase) so
+state persists across webhook-triggered re-entries at `feedback_node`.
+
+---
+
+## 9. HUMAN-IN-THE-LOOP GATES
+
+*(unchanged from your draft — still correct)*
+
+Gate behind an `approvals` row requiring explicit user approve/reject/edit:
+- First send of any brand-new variant.
+- Killing a variant / large reallocation (>50% volume shift).
+- Sending an AI-drafted reply to an inbound prospect reply (the single most
+  important gate for a sales tool demo — never auto-send replies without
+  approval in this MVP).
+- Voice escalation trigger.
+
+Not gated (fully autonomous — this is what "autonomy" judging wants to
+see): pulling signals, enriching contacts, recalculating variant metrics,
+generating the first two variants for a new campaign.
+
+---
+
+## 10. VOICE ESCALATION (STRETCH — BUILD BUT CLEARLY FLAG AS INCOMPLETE)
+
+*(unchanged from your draft)*
+
+Build `voice_escalation_node` and `Graph8Client.trigger_voice_call`
+completely, wired to fire on an intent-score threshold. Do not assume it
+works live in the demo — it depends on graph8 provisioning a connected
+phone number for the hackathon workspace, which is unconfirmed. Show a
+status badge: "Voice escalation: logic complete — awaiting connected
+number." A legitimate, honest scoping statement.
+
+---
+
+## 11. FRONTEND — DASHBOARD PAGES (React)
+
+Same 9 pages as your draft (Overview, Campaigns, Campaign Detail,
+Prospects, Inbox/Replies, Agent Decisions, Approvals, Reference Emails,
+Settings) — **built plain with React + Tailwind / shadcn, per Section 6b's
+correction, not against any graph8 component library.** Sidebar
+navigation. One addition:
+
+**Settings page** now explicitly includes the mailbox-connect card from
+Section 6c: a "Connect your inbox" button linking out to graph8's own
+Settings → Mailboxes flow, plus a live connected/not-connected status
+pulled from `Graph8Client.list_mailboxes()`.
+
+Everything else — graph8 API key status, LLM provider label, webhook URL
+display, voice escalation toggle — unchanged from your draft.
+
+---
+
+## 12. REAL-TIME UPDATES
+
+*(unchanged)*
+
+Backend: Server-Sent Events (SSE) from FastAPI. Broadcast on: new
+`agent_decisions` row, new `events` row (including inbound email replies —
+Section 6c), new `approvals` row. Frontend: single `useLiveFeed` SSE hook.
+
+---
+
+## 13. WEBHOOK RECEIVER
+
+`backend/app/webhooks/graph8.py` — a FastAPI POST endpoint that:
+- Verifies the webhook signature via `Graph8Client.verify_webhook_signature`
+  (confirm the exact header name / HMAC scheme against
+  `docs.graph8.com/developers/webhooks/` at kickoff — don't skip this).
+- Parses event type (sent/opened/replied/bounced/meeting_booked — confirm
+  exact event names against the real webhook payload at kickoff).
+- Writes to `events` table — this now includes inbound email replies from
+  a connected mailbox (Section 6c), not just sequence step events.
+- Re-enters the LangGraph workflow at `feedback_node`.
+- Broadcasts the update over SSE.
+
+This single endpoint is the entire "real-time emails on the dashboard"
+feature — no separate email pipeline needed.
+
+Setup note for the user (not for Antigravity to code): this endpoint needs
+a public URL during local dev — use ngrok or Cloudflare Tunnel, register
+that URL with graph8 (Webhooks settings) **before** the demo, and test it
+end-to-end at least once well before the 5-minute demo slot. This is the
+single most common hackathon demo failure point.
+
+---
+
+## 14. README + RUN INSTRUCTIONS (separate files, required deliverables)
+
+*(unchanged, one line added)*
+
+- `README.md`: project overview, ASCII architecture diagram,
+  problem/solution statement, tech stack, folder structure, what's fully
+  built vs. stretch/flagged (voice, LinkedIn), assumptions needing kickoff
+  verification (the endpoints marked "verify" in Section 6), judging-
+  criteria mapping.
+- `RUN_INSTRUCTIONS.md`: step-by-step from zero. Supabase setup, every
+  `.env` variable with a one-line description (`GRAPH8_API_KEY`,
+  `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, `SUPABASE_URL`,
+  `SUPABASE_KEY`, `WEBHOOK_BASE_URL`), how to run backend/frontend, ngrok +
+  webhook registration, **how to connect a test Gmail mailbox via graph8's
+  own Settings → Mailboxes flow** (Section 6c) so replies actually show up
+  during the demo, and how to seed a first test campaign end-to-end before
+  going live.
+
+---
+
+## 15. OPTIONAL — n8n LAYER (CORRECTED SCOPE)
+
+graph8's actual n8n integration (confirmed:
+`docs.graph8.com/developers/n8n-setup/`) is **MCP-based and read-oriented**:
+n8n connects to graph8 as an MCP client (an HTTP Request node hitting
+graph8's MCP endpoint) and can call tools like `list_campaigns`,
+`get_campaign`, `search_campaigns`, `list_accounts`, `get_account`,
+`search_accounts`, `list_deals`, `get_deal`, `get_intelligence`, `search`.
+It is **not** an email pipe and does not give n8n direct Gmail access —
+that stays inside graph8 (Section 6c).
+
+Given that, produce `n8n/README.md` with a node-by-node build guide for a
+workflow that adds visible automation on top of what's already built,
+without duplicating it:
+
+**Workflow: "New campaign → notify + relay"**
+1. **Webhook trigger node** — receives the same graph8 webhook our backend
+   receives (register a second webhook URL pointing at n8n, or have our
+   backend's own webhook handler forward a copy — either is fine, note the
+   tradeoff in the README).
+2. **IF/Switch node** — branch on `event_type` (e.g. only continue for
+   `replied` events with `sentiment=positive`).
+3. **HTTP Request node** — call graph8's MCP endpoint (`get_account`) to
+   pull extra company context for the notification.
+4. **Slack / Discord node** — post "🔥 Positive reply from {contact} at
+   {company} — {reasoning}" to a team channel. This is the "impressive
+   visual automation" piece for judges without re-deriving the agent logic
+   in n8n.
+5. **HTTP Request node** (optional) — call back into our own backend if you
+   want n8n to also be able to trigger a reallocation manually as a demo
+   party trick.
+
+Include exact node types, example input/output JSON per node, and where
+credentials go (n8n's credential store — graph8 API key and Slack token —
+never hardcoded in the workflow JSON). This should be detailed enough to
+build directly, without re-deriving logic.
+
+---
+
+## 16. BUILD ORDER (given ~2 days total, already underway)
+
+*(unchanged from your draft)*
+
+1. Supabase schema + backend skeleton + `Graph8Client` with the confirmed
+   endpoints above (get it talking to the real demo workspace ASAP once
+   credentials are handed out; treat the "verify" markers in Section 6 as
+   the first things to check against Swagger).
+2. LangGraph workflow: signal → enrich → generate → execute, single variant
+   first, get one full send working end-to-end.
+3. Webhook receiver + `feedback_node` + `reallocation_node` — get the loop
+   actually closing. Prioritize this over frontend polish.
+4. Frontend: Overview, Campaign Detail (live decision feed), Inbox — these
+   three carry the demo. Then Prospects, Reference Emails, Settings
+   (including the mailbox-connect card), Approvals.
+5. Connect a real Gmail mailbox via graph8's own Settings → Mailboxes
+   (Section 6c) + ngrok + webhook registration, tested end-to-end well
+   before the demo slot.
+6. Voice escalation logic wired but not demoed unless a number gets
+   connected.
+
+Do not gold-plate. A working 2-variant loop with a great live decision feed
+beats a feature-complete build that breaks live.
+
+---
+
+## APPENDIX — API KEY SCOPES TO SELECT
+
+When creating the graph8 API key (Settings → API → Create API Key), select
+only what this build actually calls. Leave everything else — including all
+`delete` scopes and anything under **Knowledge** marked "Explicit grant"
+(`knowledge:admin`, `knowledge:export`, `knowledge:read:sensitive`,
+etc.) — unchecked. A hackathon demo key doesn't need delete or admin power,
+and a narrower key is one less thing that can go wrong live.
+
+Check these (24 total):
+
+| Group | Scopes to check |
+|---|---|
+| Account | `account:read` |
+| Campaigns | `campaigns:read`, `campaigns:write`, `campaigns:run`, `campaigns:launch` |
+| Companies | `companies:read` |
+| Contacts | `contacts:read`, `contacts:write` |
+| Search | `search:read`, `search:run` |
+| Enrichment | `enrichment:read`, `enrichment:run` |
+| Sequences | `sequences:read`, `sequences:write`, `sequences:run` |
+| Intent | `intent:read`, `intent:run` |
+| Inbox | `inbox:read`, `inbox:write`, `inbox:run` |
+| Webhooks | `webhooks:read`, `webhooks:run` |
+| Analytics | `analytics:read` |
+| Fields | `fields:read` |
+
+Leave unchecked: Ads, Apps, Deals, Forms, Integrations, Knowledge (all),
+Landing pages, Lists, Marketplace, Meetings, Newsletter, Notes, Objects,
+Ops, Quotes, Radar, Sandbox, Signatures, Surveys, Tasks, Team, Transcripts,
+Usage, Visitors, Voice (unless actually wiring Section 10 live), Work,
+Workflows, and every `*:delete` scope across every group above.
+
+Set **Expires in (days)** to something short (e.g. 7) rather than no
+expiration, since this key will likely end up pasted into a shared `.env`
+during the hackathon.

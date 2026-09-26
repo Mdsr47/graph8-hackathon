@@ -1,0 +1,182 @@
+================================================================================
+GRAPH8 SELF-HEALING OUTBOUND AGENT — USER JOURNEY & CAPABILITIES GUIDE
+================================================================================
+Document: USER_JOURNEY_AND_CAPABILITIES.txt
+Project: graph8 Autonomous Self-Healing Outbound Engine
+Architecture: LangGraph + Groq LLM + FastAPI + SQLite / Supabase + React 18 / Tailwind
+
+--------------------------------------------------------------------------------
+1. SYSTEM OVERVIEW — PROBLEM YEH SYSTEM KAISE SOLVE KARTA HAI?
+--------------------------------------------------------------------------------
+Traditional outbound tools (jaise Lemlist, Instantly waghera) static sequences run
+karty hain. Agar koi template fail ho rha ho ya bounce zyada aa rhy hon, to insaan
+ko dashboard check kr k manually change krna parta hai.
+
+Yeh agent graph8 ke intent data + real-time webhooks + Groq LLM ke through:
+1. Intent signals discover karta hai (kaunsi companies website/pricing visit kr rhi hain).
+2. Prospects ko enrich karta hai (verified email, tech stack, funding).
+3. Do contrasting email variants (Variant A aur Variant B) khud write karta hai.
+4. Telemetry monitor karta hai (opens, replies, positive sentiment).
+5. Self-Healing karta hai: Underperforming variant ko automatically kill krta hai,
+   winning variant ko 100% traffic allocate krta hai, aur winning angles seekh kar
+   Variant C (evolution) khud generate karta hai!
+6. Human-in-the-Loop (HITL) safety gates ensure karty hain k koi b email ya variant
+   user ki marzi ke baghair launch na ho (Approvals tab me 1-click approve/reject).
+
+--------------------------------------------------------------------------------
+2. COMPLETE END-TO-END USER JOURNEY (QADAM BA QADAM)
+--------------------------------------------------------------------------------
+
+STEP 1: MAILBOX CONNECT KARNA (GRAPH8 MEIN)
+- User graph8 settings mein ja kr apna Gmail / SMTP mailbox connect krta hai.
+- graph8 ka native warm-up aur deliverability monitoring active ho jata hai.
+- Agent dashboard k "Overview" tab mein Mailbox Status automatically "Active" nazar aata hai.
+
+STEP 2: REFERENCE EMAILS DEFINE KARNA (AI KA KNOWLEDGE BASE)
+- Dashboard -> "Reference Emails" tab mein ja kar user apny past k best-performing 
+  emails paste kr sakta hai (default system mein already 2 high-converting proven templates loaded hain).
+- Groq LLM inhi emails ke style, length, aur hooks ko analyze kr k naye variants likhta hai.
+
+STEP 3: NAYA CAMPAIGN CREATE KARNA
+- Dashboard -> "Campaigns" tab mein ja kar "New Campaign" button click krta hai.
+- User apna ICP (Ideal Customer Profile) define krta hai:
+  * Industry (e.g. Fintech SaaS, E-commerce, B2B AI)
+  * Target Titles (e.g. VP Sales, Head of Growth, CRO)
+  * Location / Company Size
+- "Launch Campaign" click krte hi LangGraph workflow trigger ho jata hai.
+
+STEP 4: INTENT DISCOVERY & PROSPECT ENRICHMENT (AUTONOMOUS)
+- LangGraph ka "discovery_node" graph8 ke intent engine se data fetch karta hai.
+- High-intent companies ke decision-makers find krta hai.
+- "enrichment_node" un prospects ke corporate email, verified status, tech stack,
+  aur LinkedIn profile attach karta hai.
+- User Dashboard -> "Prospects" tab mein ye sab live dekh sakta hai (intent score badges k sath).
+
+STEP 5: LLM VARIANT GENERATION & HITL APPROVAL GATE 1
+- LLM do contrasting cold emails generate karta hai:
+  * Variant A: Pain-point & curiosity hook focus.
+  * Variant B: Concrete ROI metrics & benchmark proof focus.
+- System automatically "HITL Gate 1" create karta hai:
+  * Dashboard -> "Approvals" tab mein notification aati hai: "New Variant Pair Clearance".
+  * User dono variants ka text, subject line, aur strategy daikh kar "Approve" ya "Reject" kr sakta hai.
+  * Jab user "Approve" karta hai, tabhi graph8 sequence mein cold emails schedule hoty hain.
+
+STEP 6: SEQUENCE ENROLLMENT & LIVE TELEMETRY
+- Contacts ko 50/50 ratio me Variant A aur Variant B allocate kr diya jata hai.
+- graph8 sequence me contacts enroll hoty hain.
+- Dashboard -> "Overview" tab par live events stream hoty hain (Server-Sent Events / SSE):
+  * "Email Sent to Marcus Vance"
+  * "Email Opened by Sarah Jenkins"
+- Live metrics bar graphs aur percentages real-time update hoty hain.
+
+STEP 7: INBOUND PROSPECT REPLIES & SENTIMENT CLASSIFICATION
+- Jab koi prospect reply karta hai, graph8 webhook trigger hota hai:
+- Groq LLM instant sentiment analysis karta hai:
+  * "positive" -> Prospect interested hai / demo maang rha hai.
+  * "objection" -> Price ya timing ka aitraaz hai.
+  * "neutral" -> General query ya forwarding to colleague.
+  * "negative" -> "Unsubscribe" ya "Not interested".
+- Ye reply Dashboard -> "Inbox" tab mein classification badge ke sath show hota hai.
+
+STEP 8: SELF-HEALING & REINFORCEMENT CYCLE (THE MAGIC)
+- Jese hi campaign mein 5+ sends complete hoty hain (minimum sample size threshold):
+- LangGraph ka "feedback_node" variant performance compare karta hai:
+  * Variant A: 10 sends, 0 replies (0.0% conversion).
+  * Variant B: 10 sends, 3 positive replies (30.0% conversion).
+- Agent Decision Node trigger hota hai:
+  * Action: "Kill Variant A" (underperformer paused).
+  * Action: "Scale Variant B" (100% future contacts go to winner).
+  * Action: "Generate Variant C" (Groq LLM winner ke hooks ko use kr k ek aur improved version create krta hai).
+- Dashboard -> "Decisions" tab mein full transparent reasoning store hoti hai:
+  "Variant A underperformed threshold (0.0% vs 30.0%). Killed Variant A. Variant C generated."
+
+STEP 9: SMART CONTEXTUAL REPLY DRAFTING (HITL GATE 2)
+- Jab koi prospect positive reply deta hai:
+- Groq LLM background mein email thread analyze kr k context-aware reply draft krta hai
+  (e.g., calendar link provide krta hai, unke sawal ka exact answer deta hai).
+- HITL Gate: Reply direct send nahi hoti! User ko Dashboard -> "Inbox" ya "Approvals" me
+  "Approve Drafted Reply" ka option milta hai.
+- User 1 click me text edit kr k "Send" kr sakta hai.
+
+STEP 10: CONTINUOUS ADAPTATION
+- Yeh loop chalta rehta hai: nayi companies discover hoti hain, better variants evolve
+  hoty hain, aur conversion rate din ba din behtar hoti jati hai.
+
+--------------------------------------------------------------------------------
+3. DASHBOARD KA COMPLETE TOUR — HAR PAGE PAR USER KYA KYA KR SAKTA HAI
+--------------------------------------------------------------------------------
+
+1. OVERVIEW PAGE (/):
+   - Key Metrics Cards: Total Enrolled, Live Opens, Replied %, Positive Sentiment %.
+   - Mailbox Health Indicator: Live SMTP status, quota used, deliverability status.
+   - Real-time Event Stream: Live animated feed showing webhook signals as they happen.
+   - Active Campaigns Quick Table: Progress bars, active variants, current leader.
+   - Quick Simulator Button: Header me "Simulate Event" button se instant testing.
+
+2. CAMPAIGNS PAGE (/campaigns):
+   - Tamam active aur completed campaigns ki list.
+   - "New Campaign" Modal: Industry, Titles, Keywords, Target Audience define kr k campaign launch krna.
+   - Direct link to campaign deep-dive.
+
+3. CAMPAIGN DETAIL PAGE (/campaigns/:id):
+   - Side-by-side Variant Cards: Variant A vs Variant B vs Variant C.
+   - Full Email Subject line and Body preview with template variable tags.
+   - Individual metrics: Sends, Opens, Replies, Positive Replies, Status (Active / Killed / Winner).
+   - "Kill Variant" manual button (agar user khud kisi variant ko suspend krna chahy).
+   - "Force Feedback Cycle" button (agent ko manually self-heal trigger krny k liye).
+
+4. PROSPECTS PAGE (/prospects):
+   - graph8 se discover shuda prospects ki list.
+   - Intent Score Badges (e.g. 95/100 Intent, 88/100 Intent).
+   - Enriched details: Title, Company, Tech Stack (HubSpot, Salesforce, etc.), Funding stage.
+   - Sequence progress: "Enrolled Step 1", "Opened", "Replied", "Booked".
+
+5. DECISIONS PAGE (/decisions) — AGENT AUDIT LOG:
+   - Agent ke har action ki transparent explanation:
+     * Decision Type (e.g. discover_signals, generate_variant, kill_variant, scale_variant, draft_reply).
+     * Exact AI Reasoning: Agent ne yeh faisla kyun lia.
+     * Before State vs After State JSON diff.
+     * Timestamp and execution latency.
+
+6. APPROVALS PAGE (/approvals) — HUMAN-IN-THE-LOOP CONTROL TOWER:
+   - Pending Approvals List:
+     * "Send New Variant Clearance" -> Review AI written pitch before cold blast.
+     * "Self-Healing Variant C Clearance" -> Review mutated variant before replacing loser.
+     * "Drafted Reply Clearance" -> Review AI response to inbound lead before sending.
+   - Actions: "Approve" (green button) ya "Reject" (red button).
+   - Live badge counter in navigation bar jab b koi approval pending ho.
+
+7. INBOX PAGE (/inbox):
+   - Inbound prospect replies conversation view.
+   - AI Sentiment Tag: Green (Positive / Demo Request), Yellow (Objection), Red (Negative).
+   - Thread view: Outbound email sent vs Inbound reply received.
+   - AI Contextual Draft Box: AI ka taiyar kardah reply jo user edit aur approve kr sakta hai.
+
+8. REFERENCE EMAILS PAGE (/reference-emails):
+   - High-performing cold emails ka repository.
+   - "Add New Reference Email" button: User apna best sales template add kr sakta hai.
+   - AI inhi templates ko few-shot examples ke tor par utilize karta hai naye campaigns k liye.
+
+9. SETTINGS PAGE (/settings):
+   - Simulation Mode Switch (Real API vs Mock Test Sandbox).
+   - Feedback Threshold: Minimum sends before self-healing triggers (default: 5).
+   - Voice Escalation Switch: Urgent high-intent leads k liye voice agent call logic.
+   - API Status Checks: graph8 API Key health check, Groq LLM health check.
+
+--------------------------------------------------------------------------------
+4. BUILT-IN WEBHOOK SIMULATOR (ZERO-WAIT TESTING)
+--------------------------------------------------------------------------------
+Kyunki hackathon testing me har dafa real email deliver hone aur reply aane ka
+intezar krna mushkil hota hai, humne Dashboard ke top header me ek built-in
+"Simulate Event" (Purple button) banaya hai:
+
+User 1-click me ye events simulate kr sakta hai:
+- "Simulate Open": Variant ki open rate barhata hai.
+- "Simulate Positive Reply": Text likh kr send krta hai (e.g. "Send me pricing!"),
+  jo instant sentiment analysis trigger krta hai aur Inbox me draft create krta hai.
+- "Simulate Negative Reply": Text: "Unsubscribe please", jo variant score reduce krta hai.
+- "Simulate Meeting Booked": Campaign goal complete mark krta hai.
+- "Trigger Feedback Cycle": 5 sends k baad agent ko bolta hai k winner choose kro aur self-heal kro.
+
+Yeh poora system 100% autonomous, transparent, aur self-healing hai!
+================================================================================

@@ -1,0 +1,155 @@
+{
+  "name": "graph8 Self-Healing Outbound — Hot Lead Relay & Enrichment",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "graph8-relay",
+        "responseMode": "onReceived",
+        "responseData": "allEntries"
+      },
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.body.event_type }}",
+              "value2": "replied"
+            },
+            {
+              "value1": "={{ $json.body.sentiment }}",
+              "value2": "positive"
+            }
+          ]
+        },
+        "combineOperation": "all"
+      },
+      "name": "Is Positive Reply?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://be.graph8.com/api/v1/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.GRAPH8_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "tool",
+              "value": "get_account"
+            },
+            {
+              "name": "arguments",
+              "value": "={ \"domain\": \"{{ $('Webhook Trigger').item.json.body.from_email.split('@')[1] }}\" }"
+            }
+          ]
+        }
+      },
+      "name": "Fetch graph8 MCP Account Intelligence",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [680, 240]
+    },
+    {
+      "parameters": {
+        "channel": "#revops-hot-leads",
+        "text": "=🔥 *Hot Inbound Lead Notification*\n*Prospect:* {{ $('Webhook Trigger').item.json.body.from_name }} ({{ $('Webhook Trigger').item.json.body.company }})\n*Email:* `{{ $('Webhook Trigger').item.json.body.from_email }}`\n*Reply Body:* \"{{ $('Webhook Trigger').item.json.body.text }}\"\n*Sentiment:* Positive 🔥\n*Account Intelligence:* {{ $json.funding || 'Series B' }} • {{ $json.headcount || 240 }} employees\n👉 *Action:* AI reply draft awaiting your approval on the dashboard!"
+      },
+      "name": "Slack Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 1,
+      "position": [900, 240]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/api/webhooks/simulate",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "campaign_id",
+              "value": "={{ $('Webhook Trigger').item.json.body.campaign_id }}"
+            },
+            {
+              "name": "event_type",
+              "value": "meeting_booked"
+            },
+            {
+              "name": "contact_id",
+              "value": "={{ $('Webhook Trigger').item.json.body.contact_id }}"
+            }
+          ]
+        }
+      },
+      "name": "Reallocation Callback to Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1120, 240]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Is Positive Reply?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Positive Reply?": {
+      "main": [
+        [
+          {
+            "node": "Fetch graph8 MCP Account Intelligence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch graph8 MCP Account Intelligence": {
+      "main": [
+        [
+          {
+            "node": "Slack Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Alert": {
+      "main": [
+        [
+          {
+            "node": "Reallocation Callback to Backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {}
+}
