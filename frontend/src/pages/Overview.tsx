@@ -11,11 +11,13 @@ import {
   TrendingUp,
   BrainCircuit
 } from 'lucide-react';
-import { Campaign, AgentDecision, Approval } from '../types';
+import { Campaign, Contact, AgentDecision, Approval, OverviewStats } from '../types';
 import { LiveActivity } from '../hooks/useLiveFeed';
 
 interface OverviewProps {
   campaigns: Campaign[];
+  contacts?: Contact[];
+  stats?: OverviewStats | null;
   decisions: AgentDecision[];
   approvals: Approval[];
   liveActivities: LiveActivity[];
@@ -25,27 +27,29 @@ interface OverviewProps {
 
 export const Overview: React.FC<OverviewProps> = ({
   campaigns,
+  contacts = [],
+  stats,
   decisions,
   approvals,
   liveActivities,
   onSelectCampaign,
   onNavigatePage,
 }) => {
-  // Aggregate KPI metrics across all campaigns
-  const totalContacts = campaigns.reduce((acc, c) => acc + (c.contacts_count || 0), 0);
-  const totalSends = campaigns.reduce((acc, c) => acc + (c.total_sends || 0), 0);
-  const totalReplies = campaigns.reduce((acc, c) => acc + (c.total_replies || 0), 0);
-  const totalPositive = campaigns.reduce((acc, c) => acc + (c.total_positive || 0), 0);
-  const totalMeetings = campaigns.reduce((acc, c) => acc + (c.total_meetings || 0), 0);
-  const pendingApprovals = approvals.filter(a => a.status === 'pending').length;
+  // 100% Real KPI metrics directly from SQLite database
+  const totalContacts = stats?.prospects_enriched ?? (contacts.length || campaigns.reduce((acc, c) => acc + (c.contacts_count || 0), 0));
+  const totalSends = stats?.outbound_sends ?? campaigns.reduce((acc, c) => acc + (c.total_sends || 0), 0);
+  const totalReplies = stats?.total_inbound_replies ?? campaigns.reduce((acc, c) => acc + (c.total_replies || 0), 0);
+  const totalPositive = stats?.positive_sentiment ?? campaigns.reduce((acc, c) => acc + (c.total_positive || 0), 0);
+  const totalMeetings = stats?.meetings_booked ?? campaigns.reduce((acc, c) => acc + (c.total_meetings || 0), 0);
+  const pendingApprovals = stats?.pending_approvals ?? approvals.filter(a => a.status === 'pending').length;
 
   const kpis = [
-    { label: 'Prospects Enriched', value: totalContacts || 12, change: '+100% Intent-Matched', icon: Users, color: 'text-indigo-400', bg: 'bg-indigo-500/10' },
-    { label: 'Outbound Sends', value: totalSends || 16, change: 'Dynamic A/B Split', icon: Send, color: 'text-blue-400', bg: 'bg-blue-500/10' },
-    { label: 'Total Inbound Replies', value: totalReplies || 4, change: `${Math.round(((totalReplies || 4) / (totalSends || 16)) * 100)}% Conversion`, icon: MessageSquare, color: 'text-cyan-400', bg: 'bg-cyan-500/10' },
-    { label: 'Positive Sentiment', value: totalPositive || 3, change: '🔥 Hot Intent', icon: Sparkles, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
-    { label: 'Meetings Booked', value: totalMeetings || 2, change: 'Calendar Scheduled', icon: Calendar, color: 'text-purple-400', bg: 'bg-purple-500/10' },
-    { label: 'HITL Pending Gates', value: pendingApprovals, change: 'Review Required', icon: ShieldCheck, color: 'text-amber-400', bg: 'bg-amber-500/10' },
+    { label: 'Prospects Enriched', value: totalContacts, change: totalContacts > 0 ? '+100% Intent-Matched' : '0 Discovered', icon: Users, color: 'text-indigo-400', bg: 'bg-indigo-500/10' },
+    { label: 'Outbound Sends', value: totalSends, change: totalSends > 0 ? 'Dynamic A/B Split' : '0 Dispatched', icon: Send, color: 'text-blue-400', bg: 'bg-blue-500/10' },
+    { label: 'Total Inbound Replies', value: totalReplies, change: totalSends > 0 ? `${Math.round((totalReplies / totalSends) * 100)}% Conversion` : '0% Conversion', icon: MessageSquare, color: 'text-cyan-400', bg: 'bg-cyan-500/10' },
+    { label: 'Positive Sentiment', value: totalPositive, change: totalPositive > 0 ? '🔥 Hot Intent' : '0 Meetings', icon: Sparkles, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
+    { label: 'Meetings Booked', value: totalMeetings, change: totalMeetings > 0 ? 'Calendar Scheduled' : '0 Booked', icon: Calendar, color: 'text-purple-400', bg: 'bg-purple-500/10' },
+    { label: 'HITL Pending Gates', value: pendingApprovals, change: pendingApprovals > 0 ? 'Review Required' : 'All Clear', icon: ShieldCheck, color: 'text-amber-400', bg: 'bg-amber-500/10' },
   ];
 
   return (

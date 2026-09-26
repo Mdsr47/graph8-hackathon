@@ -157,6 +157,45 @@ class Database:
                 status TEXT NOT NULL DEFAULT 'active'
             )""")
 
+            await db.execute("""
+            CREATE TABLE IF NOT EXISTS mailbox_settings (
+                id TEXT PRIMARY KEY,
+                provider TEXT DEFAULT 'gmail',
+                smtp_host TEXT,
+                smtp_port INTEGER DEFAULT 587,
+                smtp_username TEXT,
+                smtp_password TEXT,
+                smtp_use_tls INTEGER DEFAULT 1,
+                smtp_use_ssl INTEGER DEFAULT 0,
+                imap_host TEXT,
+                imap_port INTEGER DEFAULT 993,
+                imap_username TEXT,
+                imap_password TEXT,
+                imap_use_ssl INTEGER DEFAULT 1,
+                from_name TEXT,
+                from_email TEXT,
+                status TEXT DEFAULT 'disconnected',
+                last_synced_at TEXT,
+                updated_at TEXT
+            )""")
+
+            await db.execute("""
+            CREATE TABLE IF NOT EXISTS inbox_messages (
+                id TEXT PRIMARY KEY,
+                contact_id TEXT,
+                contact_name TEXT NOT NULL,
+                contact_email TEXT NOT NULL,
+                company TEXT,
+                subject TEXT NOT NULL,
+                body TEXT NOT NULL,
+                sentiment TEXT DEFAULT 'neutral',
+                status TEXT DEFAULT 'unread',
+                message_id TEXT,
+                received_at TEXT NOT NULL,
+                ai_draft_reply TEXT,
+                created_at TEXT NOT NULL
+            )""")
+
             await db.commit()
 
         # Seed initial defaults if needed
@@ -206,6 +245,7 @@ class Database:
             await db.execute("DELETE FROM reference_emails")
             await db.execute("DELETE FROM settings")
             await db.execute("DELETE FROM mailbox_status")
+            await db.execute("DELETE FROM inbox_messages")
             await db.commit()
             await db.execute("VACUUM")
         await self._seed_defaults_if_empty()
@@ -329,6 +369,14 @@ class Database:
                 await db.execute("UPDATE contacts SET status = ?, current_step = ? WHERE id = ?", (status, step, contact_id))
             else:
                 await db.execute("UPDATE contacts SET status = ? WHERE id = ?", (status, contact_id))
+            await db.commit()
+
+    async def update_contact_enrichment(self, contact_id: str, enriched_data: Dict[str, Any]):
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            await db.execute(
+                "UPDATE contacts SET enriched_data = ? WHERE id = ?",
+                (json.dumps(enriched_data), contact_id)
+            )
             await db.commit()
 
     # --- VARIANTS ---
@@ -629,5 +677,174 @@ class Database:
                 (mid, data.get("provider", "gmail"), data.get("graph8_mailbox_id"), connected_at, data.get("status", "active"))
             )
             await db.commit()
+
+    # --- MAILBOX SETTINGS (SMTP & IMAP) ---
+    async def get_mailbox_settings(self) -> Optional[Dict[str, Any]]:
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT * FROM mailbox_settings LIMIT 1")
+            r = await cursor.fetchone()
+            if not r:
+                return None
+            return {
+                "id": r["id"],
+                "provider": r["provider"],
+                "smtp_host": r["smtp_host"],
+                "smtp_port": r["smtp_port"],
+                "smtp_username": r["smtp_username"],
+                "smtp_password": r["smtp_password"],
+                "smtp_use_tls": bool(r["smtp_use_tls"]),
+                "smtp_use_ssl": bool(r["smtp_use_ssl"]),
+                "imap_host": r["imap_host"],
+                "imap_port": r["imap_port"],
+                "imap_username": r["imap_username"],
+                "imap_password": r["imap_password"],
+                "imap_use_ssl": bool(r["imap_use_ssl"]),
+                "from_name": r["from_name"],
+                "from_email": r["from_email"],
+                "status": r["status"],
+                "last_synced_at": r["last_synced_at"],
+                "updated_at": r["updated_at"]
+            }
+
+    async def save_mailbox_settings(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        mid = "default_mailbox"
+        now = datetime.now(timezone.utc).isoformat()
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            await db.execute("DELETE FROM mailbox_settings")
+            await db.execute(
+                """INSERT INTO mailbox_settings (
+                    id, provider, smtp_host, smtp_port, smtp_username, smtp_password,
+                    smtp_use_tls, smtp_use_ssl, imap_host, imap_port, imap_username, imap_password,
+                    imap_use_ssl, from_name, from_email, status, last_synced_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    mid, data.get("provider", "gmail"),
+                    data.get("smtp_host", "smtp.gmail.com"), int(data.get("smtp_port", 587)),
+                    data.get("smtp_username", ""), data.get("smtp_password", ""),
+                    1 if data.get("smtp_use_tls", True) else 0, 1 if data.get("smtp_use_ssl", False) else 0,
+                    data.get("imap_host", "imap.gmail.com"), int(data.get("imap_port", 993)),
+                    data.get("imap_username", ""), data.get("imap_password", ""),
+                    1 if data.get("imap_use_ssl", True) else 0,
+                    data.get("from_name", "RevOps Agent"), data.get("from_email", data.get("smtp_username", "")),
+                    data.get("status", "connected"), now, now
+                )
+            )
+            await db.commit()
+        return await self.get_mailbox_settings()
+
+    async def update_mailbox_sync(self, status: str, last_synced_at: str):
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            await db.execute(
+                "UPDATE mailbox_settings SET status = ?, last_synced_at = ?",
+                (status, last_synced_at)
+            )
+            await db.commit()
+
+    # --- INBOX MESSAGES ---
+    async def get_inbox_messages(self, limit: int = 50) -> List[Dict[str, Any]]:
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT * FROM inbox_messages ORDER BY received_at DESC LIMIT ?", (limit,))
+            rows = await cursor.fetchall()
+            return [{
+                "id": r["id"],
+                "contact_id": r["contact_id"],
+                "contact_name": r["contact_name"],
+                "contact_email": r["contact_email"],
+                "company": r["company"],
+                "subject": r["subject"],
+                "body": r["body"],
+                "sentiment": r["sentiment"],
+                "status": r["status"],
+                "message_id": r["message_id"],
+                "received_at": r["received_at"],
+                "ai_draft_reply": r["ai_draft_reply"],
+                "created_at": r["created_at"]
+            } for r in rows]
+
+    async def save_inbox_message(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        msg_id = data.get("message_id")
+        now = datetime.now(timezone.utc).isoformat()
+        mid = data.get("id") or str(uuid.uuid4())
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            if msg_id:
+                cursor = await db.execute("SELECT id FROM inbox_messages WHERE message_id = ?", (msg_id,))
+                existing = await cursor.fetchone()
+                if existing:
+                    return {"id": existing[0], "already_exists": True}
+
+            await db.execute(
+                """INSERT INTO inbox_messages (
+                    id, contact_id, contact_name, contact_email, company, subject, body,
+                    sentiment, status, message_id, received_at, ai_draft_reply, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    mid, data.get("contact_id"), data["contact_name"], data["contact_email"],
+                    data.get("company", "Enterprise Account"), data["subject"], data["body"],
+                    data.get("sentiment", "neutral"), data.get("status", "unread"),
+                    msg_id, data.get("received_at", now), data.get("ai_draft_reply"), now
+                )
+            )
+            await db.commit()
+        data["id"] = mid
+        return data
+
+    async def update_inbox_message_draft(self, item_id: str, draft: str):
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            await db.execute("UPDATE inbox_messages SET ai_draft_reply = ? WHERE id = ?", (draft, item_id))
+            await db.commit()
+
+    async def update_inbox_message_status(self, item_id: str, status: str):
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            await db.execute("UPDATE inbox_messages SET status = ? WHERE id = ?", (status, item_id))
+            await db.commit()
+
+    # --- REAL OVERVIEW STATS ---
+    async def get_overview_stats(self) -> Dict[str, Any]:
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            # 1. Total contacts
+            c1 = await db.execute("SELECT COUNT(*) FROM contacts")
+            total_contacts = (await c1.fetchone())[0]
+
+            # 2. Variants aggregate sends, replies, positive, meetings
+            c2 = await db.execute("""
+                SELECT 
+                    COALESCE(SUM(sends_count), 0),
+                    COALESCE(SUM(replies_count), 0),
+                    COALESCE(SUM(positive_replies_count), 0),
+                    COALESCE(SUM(meetings_count), 0)
+                FROM variants
+            """)
+            var_row = await c2.fetchone()
+            total_sends = var_row[0]
+            var_replies = var_row[1]
+            var_pos = var_row[2]
+            total_meetings = var_row[3]
+
+            # 3. Real inbound replies from inbox_messages or events
+            c3 = await db.execute("SELECT COUNT(*) FROM inbox_messages")
+            inbox_count = (await c3.fetchone())[0]
+
+            c4 = await db.execute("SELECT COUNT(*) FROM events WHERE event_type = 'replied'")
+            replied_events = (await c4.fetchone())[0]
+
+            c5 = await db.execute("SELECT COUNT(*) FROM inbox_messages WHERE sentiment = 'positive'")
+            pos_inbox = (await c5.fetchone())[0]
+
+            c6 = await db.execute("SELECT COUNT(*) FROM approvals WHERE status = 'pending'")
+            pending_approvals = (await c6.fetchone())[0]
+
+            total_replies = max(var_replies, inbox_count, replied_events)
+            total_positive = max(var_pos, pos_inbox)
+
+            return {
+                "prospects_enriched": total_contacts,
+                "outbound_sends": total_sends,
+                "total_inbound_replies": total_replies,
+                "positive_sentiment": total_positive,
+                "meetings_booked": total_meetings,
+                "pending_approvals": pending_approvals
+            }
 
 db = Database()

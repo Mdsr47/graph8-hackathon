@@ -54,51 +54,60 @@ export const Prospects: React.FC<ProspectsProps> = ({ contacts }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
-              {filtered.map((c) => (
-                <tr
-                  key={c.id}
-                  onClick={() => setSelectedContact(c)}
-                  className="hover:bg-slate-800/40 cursor-pointer transition"
-                >
-                  <td className="px-5 py-3.5 font-medium text-white">
-                    <div>{c.name}</div>
-                    <div className="text-[11px] text-slate-400 font-mono">{c.email}</div>
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <div className="text-white font-medium">{c.company || 'Enterprise Account'}</div>
-                    <div className="text-slate-400 text-[11px]">{c.title || 'Executive'}</div>
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <div className="flex items-center gap-2">
-                      <div className="w-16 h-2 rounded-full bg-slate-800 overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-indigo-500 to-emerald-400 rounded-full"
-                          style={{ width: `${Math.min(c.intent_score, 100)}%` }}
-                        />
-                      </div>
-                      <span className="font-bold text-indigo-400 font-mono">{c.intent_score}</span>
-                    </div>
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <span
-                      className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
-                        c.status === 'replied'
-                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                          : c.status === 'enrolled'
-                          ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'
-                          : 'bg-slate-800 text-slate-400 border-slate-700'
-                      }`}
-                    >
-                      {c.status.toUpperCase()}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3.5 text-right">
-                    <button className="text-slate-400 hover:text-white transition">
-                      <ChevronRight className="w-4 h-4 ml-auto" />
-                    </button>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-5 py-12 text-center text-slate-500">
+                    <p className="font-semibold text-slate-400">No prospects in database yet</p>
+                    <p className="text-[11px] text-slate-500 mt-1">Launch a campaign to discover, verify, and store intent-matched decision makers here.</p>
                   </td>
                 </tr>
-              ))}
+              ) : (
+                filtered.map((c) => (
+                  <tr
+                    key={c.id}
+                    onClick={() => setSelectedContact(c)}
+                    className="hover:bg-slate-800/40 cursor-pointer transition"
+                  >
+                    <td className="px-5 py-3.5 font-medium text-white">
+                      <div>{c.name}</div>
+                      <div className="text-[11px] text-slate-400 font-mono">{c.email}</div>
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <div className="text-white font-medium">{c.company || 'Enterprise Account'}</div>
+                      <div className="text-slate-400 text-[11px]">{c.title || 'Executive'}</div>
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <div className="flex items-center gap-2">
+                        <div className="w-16 h-2 rounded-full bg-slate-800 overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-indigo-500 to-emerald-400 rounded-full"
+                            style={{ width: `${Math.min(c.intent_score, 100)}%` }}
+                          />
+                        </div>
+                        <span className="font-bold text-indigo-400 font-mono">{c.intent_score}</span>
+                      </div>
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <span
+                        className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
+                          c.status === 'replied'
+                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                            : c.status === 'enrolled'
+                            ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'
+                            : 'bg-slate-800 text-slate-400 border-slate-700'
+                        }`}
+                      >
+                        {c.status.toUpperCase()}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3.5 text-right">
+                      <button className="text-slate-400 hover:text-white transition">
+                        <ChevronRight className="w-4 h-4 ml-auto" />
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -120,7 +129,20 @@ export const Prospects: React.FC<ProspectsProps> = ({ contacts }) => {
               <div>
                 <h4 className="text-sm font-bold text-white">{selectedContact.name}</h4>
                 <p className="text-slate-400">{selectedContact.title} at {selectedContact.company}</p>
-                <p className="text-indigo-400 font-mono mt-0.5">{selectedContact.email}</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-indigo-400 font-mono">{selectedContact.email}</span>
+                  {selectedContact.enriched_data?.linkedin_url && (
+                    <a
+                      href={selectedContact.enriched_data.linkedin_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[11px] text-blue-400 hover:underline flex items-center gap-0.5"
+                    >
+                      <span>LinkedIn Profile</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  )}
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3 pt-3 border-t border-slate-800">
@@ -131,26 +153,38 @@ export const Prospects: React.FC<ProspectsProps> = ({ contacts }) => {
                 </div>
                 <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
                   <span className="text-[10px] text-slate-500 uppercase font-semibold block mb-1">Funding & Stage</span>
-                  <div className="text-base font-bold text-white">Series B ($28M)</div>
-                  <span className="text-[10px] text-slate-400">Revenue expansion</span>
+                  <div className="text-base font-bold text-white">
+                    {selectedContact.enriched_data?.recent_funding || 'Series B ($28M)'}
+                  </div>
+                  <span className="text-[10px] text-slate-400">
+                    {selectedContact.enriched_data?.company_size || 'Revenue expansion'}
+                  </span>
                 </div>
               </div>
 
-              <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1.5">
-                <span className="text-[10px] text-slate-400 uppercase font-semibold block">Detected Tech Stack:</span>
-                <div className="flex flex-wrap gap-1.5">
-                  {['HubSpot', 'Salesforce', 'Outreach', 'Segment', 'AWS'].map((t, idx) => (
-                    <span key={idx} className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[10px]">
-                      {t}
-                    </span>
-                  ))}
+              {selectedContact.enriched_data?.tech_stack && (
+                <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1.5">
+                  <span className="text-[10px] text-slate-400 uppercase font-semibold block">Detected Tech Stack:</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedContact.enriched_data.tech_stack.map((t, idx) => (
+                      <span key={idx} className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[10px]">
+                        {t}
+                      </span>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
-              <div className="p-3.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-300">
-                <span className="font-semibold block mb-1">Agent Strategy Hook:</span>
-                Prospect visited pricing page and searched for deliverability automation. Pitched on self-healing domain preservation.
-              </div>
+              {selectedContact.enriched_data?.key_priorities && (
+                <div className="p-3.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 space-y-1">
+                  <span className="font-semibold block mb-1">Identified Key Priorities:</span>
+                  <ul className="list-disc list-inside space-y-0.5 text-[11px] text-indigo-200">
+                    {selectedContact.enriched_data.key_priorities.map((p, idx) => (
+                      <li key={idx}>{p}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
 
             <div className="p-4 border-t border-slate-800 bg-slate-800/30 flex justify-end">

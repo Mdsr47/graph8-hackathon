@@ -53,7 +53,7 @@ def reset_direct_sqlite():
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
     cursor = conn.cursor()
 
-    tables = ["campaigns", "contacts", "variants", "events", "agent_decisions", "approvals", "reference_emails", "settings", "mailbox_status"]
+    tables = ["campaigns", "contacts", "variants", "events", "agent_decisions", "approvals", "reference_emails", "settings", "mailbox_status", "inbox_messages"]
     for t in tables:
         try:
             cursor.execute(f"DELETE FROM {t}")

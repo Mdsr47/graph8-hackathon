@@ -23,7 +23,8 @@ import {
   Approval,
   InboxItem,
   ReferenceEmail,
-  SettingsData
+  SettingsData,
+  OverviewStats
 } from './types';
 
 export const App: React.FC = () => {
@@ -38,6 +39,7 @@ export const App: React.FC = () => {
   const [inboxItems, setInboxItems] = useState<InboxItem[]>([]);
   const [referenceEmails, setReferenceEmails] = useState<ReferenceEmail[]>([]);
   const [settingsData, setSettingsData] = useState<SettingsData | null>(null);
+  const [overviewStats, setOverviewStats] = useState<OverviewStats | null>(null);
 
   // Modals
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
@@ -46,7 +48,7 @@ export const App: React.FC = () => {
   // Fetch all core data
   const fetchAllData = async () => {
     try {
-      const [cRes, pRes, dRes, aRes, iRes, rRes, sRes] = await Promise.all([
+      const [cRes, pRes, dRes, aRes, iRes, rRes, sRes, stRes] = await Promise.all([
         fetch('/api/campaigns'),
         fetch('/api/prospects'),
         fetch('/api/decisions?limit=50'),
@@ -54,6 +56,7 @@ export const App: React.FC = () => {
         fetch('/api/inbox'),
         fetch('/api/reference-emails'),
         fetch('/api/settings'),
+        fetch('/api/stats'),
       ]);
 
       if (cRes.ok) setCampaigns(await cRes.json());
@@ -63,6 +66,7 @@ export const App: React.FC = () => {
       if (iRes.ok) setInboxItems(await iRes.json());
       if (rRes.ok) setReferenceEmails(await rRes.json());
       if (sRes.ok) setSettingsData(await sRes.json());
+      if (stRes.ok) setOverviewStats(await stRes.json());
     } catch (err) {
       console.error('Failed to fetch initial data:', err);
     }
@@ -170,6 +174,30 @@ export const App: React.FC = () => {
     await fetchAllData();
   };
 
+  const handleSyncInbox = async () => {
+    const res = await fetch('/api/mailboxes/sync', { method: 'POST' });
+    if (res.ok) {
+      await fetchAllData();
+    } else {
+      const err = await res.json();
+      throw new Error(err.detail || 'IMAP sync failed');
+    }
+  };
+
+  const handleComposeEmail = async (to: string, subject: string, body: string) => {
+    const res = await fetch('/api/inbox/compose', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to_email: to, subject, body }),
+    });
+    if (res.ok) {
+      await fetchAllData();
+    } else {
+      const err = await res.json();
+      throw new Error(err.detail || 'Failed to send outbound email via SMTP');
+    }
+  };
+
   const handleAddRefEmail = async (subject: string, body: string, notes?: string) => {
     await fetch('/api/reference-emails', {
       method: 'POST',
@@ -214,6 +242,8 @@ export const App: React.FC = () => {
           {activePage === 'overview' && (
             <Overview
               campaigns={campaigns}
+              contacts={contacts}
+              stats={overviewStats}
               decisions={decisions}
               approvals={approvals}
               liveActivities={activities}
@@ -249,6 +279,8 @@ export const App: React.FC = () => {
               onGenerateDraft={handleGenerateDraft}
               onSendReply={handleSendReply}
               onNavigateApprovals={() => setActivePage('approvals')}
+              onSyncInbox={handleSyncInbox}
+              onComposeEmail={handleComposeEmail}
             />
           )}
 

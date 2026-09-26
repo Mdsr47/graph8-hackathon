@@ -16,7 +16,8 @@ from app.routers import (
     reference_emails,
     settings as settings_router,
     webhooks,
-    events
+    events,
+    mailboxes
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -57,6 +58,12 @@ app.include_router(reference_emails.router)
 app.include_router(settings_router.router)
 app.include_router(webhooks.router)
 app.include_router(events.router)
+app.include_router(mailboxes.router)
+
+@app.get("/api/stats")
+async def get_overview_stats():
+    """Returns 100% real aggregate KPI metrics directly from SQLite database."""
+    return await db.get_overview_stats()
 
 @app.get("/api/health")
 async def health_check():

@@ -38,6 +38,8 @@ export interface Contact {
     tech_stack?: string[];
     recent_funding?: string;
     key_priorities?: string[];
+    company_size?: string;
+    annual_revenue?: string;
   };
   created_at: string;
 }
@@ -141,4 +143,33 @@ export interface SettingsData {
     sent_today?: number;
   };
   graph8_mailbox_settings_url: string;
+}
+
+export interface MailboxConfig {
+  configured?: boolean;
+  provider: 'gmail' | 'outlook' | 'custom';
+  smtp_host: string;
+  smtp_port: number;
+  smtp_username: string;
+  smtp_password?: string;
+  smtp_use_tls: boolean;
+  smtp_use_ssl: boolean;
+  imap_host: string;
+  imap_port: number;
+  imap_username: string;
+  imap_password?: string;
+  imap_use_ssl: boolean;
+  from_name: string;
+  from_email: string;
+  status: 'connected' | 'disconnected' | 'error';
+  last_synced_at?: string;
+}
+
+export interface OverviewStats {
+  prospects_enriched: number;
+  outbound_sends: number;
+  total_inbound_replies: number;
+  positive_sentiment: number;
+  meetings_booked: number;
+  pending_approvals: number;
 }
