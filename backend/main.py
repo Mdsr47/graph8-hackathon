@@ -1,7 +1,7 @@
 import os
 import sys
 
-# Ensure backend root is on sys.path
+# Ensure backend root directory is on sys.path so 'app.*' imports resolve cleanly
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app.main import app

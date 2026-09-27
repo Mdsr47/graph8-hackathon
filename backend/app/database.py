@@ -14,7 +14,17 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, hashed: str) -> bool:
     return hash_password(password) == hashed
 
-DB_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "graph8_agent.db")
+if os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
+    DB_FILE = "/tmp/graph8_agent.db"
+    _orig_db = os.path.join(os.path.dirname(os.path.dirname(__file__)), "graph8_agent.db")
+    if os.path.exists(_orig_db) and not os.path.exists(DB_FILE):
+        try:
+            import shutil
+            shutil.copy2(_orig_db, DB_FILE)
+        except Exception:
+            pass
+else:
+    DB_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "graph8_agent.db")
 
 class Database:
     def __init__(self):
