@@ -20,6 +20,11 @@ export interface Campaign {
   total_replies?: number;
   total_positive?: number;
   total_meetings?: number;
+  cycle_number?: number;
+  cycle_start_date?: string;
+  cycle_duration_days?: number;
+  champion_variant_id?: string;
+  challenger_variant_id?: string;
   reply_rate?: number;
 }
 
@@ -242,5 +247,18 @@ export interface AnalyticsData {
     target_contacts_limit: number;
     sent_today: number;
     last_batch_run_at?: string;
+    cycle_number?: number;
+    cycle_start_date?: string;
+    cycle_duration_days?: number;
+    champion_variant_id?: string;
+    challenger_variant_id?: string;
   }>;
+  cycle_info?: {
+    cycle_number: number;
+    current_day: number;
+    max_days: number;
+    champion_variant_id?: string;
+    challenger_variant_id?: string;
+    phase: string;
+  };
 }

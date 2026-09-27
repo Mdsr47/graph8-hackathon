@@ -58,6 +58,26 @@ class Database:
                 await db.execute("ALTER TABLE campaigns ADD COLUMN last_batch_run_at TEXT")
             except Exception:
                 pass
+            try:
+                await db.execute("ALTER TABLE campaigns ADD COLUMN cycle_number INTEGER DEFAULT 1")
+            except Exception:
+                pass
+            try:
+                await db.execute("ALTER TABLE campaigns ADD COLUMN cycle_start_date TEXT")
+            except Exception:
+                pass
+            try:
+                await db.execute("ALTER TABLE campaigns ADD COLUMN cycle_duration_days INTEGER DEFAULT 15")
+            except Exception:
+                pass
+            try:
+                await db.execute("ALTER TABLE campaigns ADD COLUMN champion_variant_id TEXT")
+            except Exception:
+                pass
+            try:
+                await db.execute("ALTER TABLE campaigns ADD COLUMN challenger_variant_id TEXT")
+            except Exception:
+                pass
 
             await db.execute("""
             CREATE TABLE IF NOT EXISTS contacts (
@@ -293,6 +313,11 @@ class Database:
                 "target_contacts_limit": r["target_contacts_limit"] if "target_contacts_limit" in r.keys() else 50,
                 "sent_today": r["sent_today"] if "sent_today" in r.keys() else 0,
                 "last_batch_run_at": r["last_batch_run_at"] if "last_batch_run_at" in r.keys() else None,
+                "cycle_number": r["cycle_number"] if "cycle_number" in r.keys() and r["cycle_number"] else 1,
+                "cycle_start_date": r["cycle_start_date"] if "cycle_start_date" in r.keys() else None,
+                "cycle_duration_days": r["cycle_duration_days"] if "cycle_duration_days" in r.keys() and r["cycle_duration_days"] else 15,
+                "champion_variant_id": r["champion_variant_id"] if "champion_variant_id" in r.keys() else None,
+                "challenger_variant_id": r["challenger_variant_id"] if "challenger_variant_id" in r.keys() else None,
                 "created_at": r["created_at"],
                 "org_id": r["org_id"]
             } for r in rows]
@@ -314,6 +339,11 @@ class Database:
                 "target_contacts_limit": r["target_contacts_limit"] if "target_contacts_limit" in r.keys() else 50,
                 "sent_today": r["sent_today"] if "sent_today" in r.keys() else 0,
                 "last_batch_run_at": r["last_batch_run_at"] if "last_batch_run_at" in r.keys() else None,
+                "cycle_number": r["cycle_number"] if "cycle_number" in r.keys() and r["cycle_number"] else 1,
+                "cycle_start_date": r["cycle_start_date"] if "cycle_start_date" in r.keys() else None,
+                "cycle_duration_days": r["cycle_duration_days"] if "cycle_duration_days" in r.keys() and r["cycle_duration_days"] else 15,
+                "champion_variant_id": r["champion_variant_id"] if "champion_variant_id" in r.keys() else None,
+                "challenger_variant_id": r["challenger_variant_id"] if "challenger_variant_id" in r.keys() else None,
                 "created_at": r["created_at"],
                 "org_id": r["org_id"]
             }
@@ -325,12 +355,14 @@ class Database:
         ref_ids = json.dumps(data.get("reference_email_ids", []))
         daily_lim = data.get("daily_limit", 50)
         target_contacts = data.get("target_contacts_limit", 50)
+        cycle_num = data.get("cycle_number", 1)
+        cycle_days = data.get("cycle_duration_days", 15)
         async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
             await db.execute(
                 """INSERT INTO campaigns 
-                (id, name, status, icp_filters, reference_email_ids, daily_limit, target_contacts_limit, sent_today, created_at, org_id) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (cid, data["name"], data.get("status", "draft"), icp, ref_ids, daily_lim, target_contacts, 0, created_at, data.get("org_id"))
+                (id, name, status, icp_filters, reference_email_ids, daily_limit, target_contacts_limit, sent_today, cycle_number, cycle_start_date, cycle_duration_days, created_at, org_id) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (cid, data["name"], data.get("status", "draft"), icp, ref_ids, daily_lim, target_contacts, 0, cycle_num, created_at, cycle_days, created_at, data.get("org_id"))
             )
             await db.commit()
         return await self.get_campaign(cid)
@@ -347,6 +379,30 @@ class Database:
             await db.execute(
                 "UPDATE campaigns SET sent_today = sent_today + ?, last_batch_run_at = ? WHERE id = ?",
                 (added_sends, now, campaign_id)
+            )
+            await db.commit()
+            return True
+
+    async def reset_campaign_daily_pacing(self, campaign_id: str) -> bool:
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            await db.execute("UPDATE campaigns SET sent_today = 0 WHERE id = ?", (campaign_id,))
+            await db.commit()
+            return True
+
+    async def advance_campaign_cycle(
+        self,
+        campaign_id: str,
+        cycle_number: int,
+        champion_id: Optional[str] = None,
+        challenger_id: Optional[str] = None
+    ) -> bool:
+        now = datetime.now(timezone.utc).isoformat()
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            await db.execute(
+                """UPDATE campaigns 
+                SET cycle_number = ?, cycle_start_date = ?, champion_variant_id = ?, challenger_variant_id = ?
+                WHERE id = ?""",
+                (cycle_number, now, champion_id, challenger_id, campaign_id)
             )
             await db.commit()
             return True
@@ -686,6 +742,33 @@ class Database:
                 intent_buckets["tier_3_mild"] += 1
 
         overall_deliv = max(0, tot_sends - tot_bounces)
+
+        cycle_info = None
+        selected_camp = camp_rows[0] if camp_rows else None
+        if selected_camp:
+            c_num = selected_camp["cycle_number"] if "cycle_number" in selected_camp.keys() and selected_camp["cycle_number"] else 1
+            c_start = selected_camp["cycle_start_date"] if "cycle_start_date" in selected_camp.keys() else None
+            c_days = selected_camp["cycle_duration_days"] if "cycle_duration_days" in selected_camp.keys() and selected_camp["cycle_duration_days"] else 15
+            current_day = 1
+            if c_start:
+                try:
+                    s_dt = datetime.fromisoformat(c_start)
+                    now_dt = datetime.now(timezone.utc)
+                    diff = (now_dt - s_dt).days + 1
+                    current_day = max(1, min(diff, c_days))
+                except Exception:
+                    pass
+
+            phase_name = "Phase 1: Exploration (50/50 Split)" if c_num == 1 else f"Phase {c_num}: Champion Scaled (80/20) vs Challenger"
+            cycle_info = {
+                "cycle_number": c_num,
+                "current_day": current_day,
+                "max_days": c_days,
+                "champion_variant_id": selected_camp["champion_variant_id"] if "champion_variant_id" in selected_camp.keys() else None,
+                "challenger_variant_id": selected_camp["challenger_variant_id"] if "challenger_variant_id" in selected_camp.keys() else None,
+                "phase": phase_name
+            }
+
         return {
             "summary": {
                 "total_sends": tot_sends,
@@ -707,6 +790,7 @@ class Database:
             },
             "variants": variant_analytics,
             "intent_distribution": intent_buckets,
+            "cycle_info": cycle_info,
             "campaigns": [{
                 "id": c["id"],
                 "name": c["name"],
@@ -714,7 +798,12 @@ class Database:
                 "daily_limit": c["daily_limit"] if "daily_limit" in c.keys() else 50,
                 "target_contacts_limit": c["target_contacts_limit"] if "target_contacts_limit" in c.keys() else 50,
                 "sent_today": c["sent_today"] if "sent_today" in c.keys() else 0,
-                "last_batch_run_at": c["last_batch_run_at"] if "last_batch_run_at" in c.keys() else None
+                "last_batch_run_at": c["last_batch_run_at"] if "last_batch_run_at" in c.keys() else None,
+                "cycle_number": c["cycle_number"] if "cycle_number" in c.keys() and c["cycle_number"] else 1,
+                "cycle_start_date": c["cycle_start_date"] if "cycle_start_date" in c.keys() else None,
+                "cycle_duration_days": c["cycle_duration_days"] if "cycle_duration_days" in c.keys() and c["cycle_duration_days"] else 15,
+                "champion_variant_id": c["champion_variant_id"] if "champion_variant_id" in c.keys() else None,
+                "challenger_variant_id": c["challenger_variant_id"] if "challenger_variant_id" in c.keys() else None
             } for c in camp_rows]
         }
 

@@ -24,6 +24,32 @@ export const Analytics: React.FC = () => {
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>('all');
   const [loading, setLoading] = useState<boolean>(true);
   const [expandedVariantId, setExpandedVariantId] = useState<string | null>(null);
+  const [evaluatingCycle, setEvaluatingCycle] = useState<boolean>(false);
+  const [cycleToast, setCycleToast] = useState<string | null>(null);
+
+  const handleEvaluateCycle = async () => {
+    const campId = selectedCampaignId !== 'all' ? selectedCampaignId : (analyticsData?.campaigns[0]?.id || null);
+    if (!campId) {
+      alert("Please select a specific campaign to evaluate its 15-day cycle milestone.");
+      return;
+    }
+    setEvaluatingCycle(true);
+    try {
+      const res = await fetch(`/api/campaigns/${campId}/evaluate-cycle-milestone`, { method: 'POST' });
+      const data = await res.json();
+      if (data.status === 'success') {
+        setCycleToast(`🎉 15-Day Milestone Evaluated! Champion scaled to 80% traffic and evolved ${data.challenger.label} for Cycle ${data.new_cycle}.`);
+        await fetchAnalytics(selectedCampaignId);
+      } else {
+        alert(data.message || 'Milestone evaluation not ready.');
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setEvaluatingCycle(false);
+      setTimeout(() => setCycleToast(null), 8000);
+    }
+  };
 
   const fetchAnalytics = async (campId: string) => {
     setLoading(true);
@@ -130,6 +156,70 @@ export const Analytics: React.FC = () => {
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-indigo-400' : ''}`} />
           </button>
         </div>
+      </div>
+
+      {/* Cycle Toast */}
+      {cycleToast && (
+        <div className="p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 text-sm flex items-center justify-between animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-indigo-400 shrink-0" />
+            <span>{cycleToast}</span>
+          </div>
+          <button onClick={() => setCycleToast(null)} className="text-slate-400 hover:text-white text-xs ml-4">✕</button>
+        </div>
+      )}
+
+      {/* 15-Day Self-Healing Reinforcement Cycle Banner */}
+      <div className="p-5 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 border border-indigo-500/20 flex flex-col md:flex-row md:items-center justify-between gap-5">
+        <div className="space-y-2 flex-1">
+          <div className="flex items-center gap-2.5">
+            <span className="text-[11px] font-black uppercase px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 tracking-wider">
+              {analyticsData?.cycle_info?.phase || "Cycle 1: Exploration Phase (50/50 Split)"}
+            </span>
+            <span className="text-xs text-slate-400 flex items-center gap-1">
+              <Calendar className="w-3.5 h-3.5 text-slate-400" />
+              Day {analyticsData?.cycle_info?.current_day || 1} of {analyticsData?.cycle_info?.max_days || 15}
+            </span>
+          </div>
+          <p className="text-xs text-slate-300">
+            {analyticsData?.cycle_info?.cycle_number === 1 ? (
+              "Initial 15-day exploration tournament. Outbound volume is split 50/50 between variants to establish statistically sound Bayesian baselines before scaling the winner."
+            ) : (
+              `Cycle ${analyticsData?.cycle_info?.cycle_number || 2}: Champion variant scaled to 80% traffic allocation while Evolutionary Challenger competes on remaining 20% traffic.`
+            )}
+          </p>
+
+          {/* Progress Bar for 15 Days */}
+          <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden max-w-md">
+            <div
+              className="bg-indigo-500 h-1.5 rounded-full transition-all duration-500"
+              style={{ width: `${Math.min(100, (((analyticsData?.cycle_info?.current_day || 1) / (analyticsData?.cycle_info?.max_days || 15)) * 100))}%` }}
+            />
+          </div>
+        </div>
+
+        <div className="flex flex-col sm:flex-row items-center gap-3 shrink-0">
+          <button
+            onClick={handleEvaluateCycle}
+            disabled={evaluatingCycle || !variants.length}
+            className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold transition flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/20 cursor-pointer"
+            title="Fast-forward: Evaluates DB performance metrics, crowns Champion to 80% traffic, and breeds Variant C via LLM"
+          >
+            <Zap className={`w-3.5 h-3.5 text-amber-300 ${evaluatingCycle ? 'animate-spin' : ''}`} />
+            {evaluatingCycle ? "Evaluating Milestone..." : "⚡ Evaluate 15-Day Milestone Now"}
+          </button>
+        </div>
+      </div>
+
+      {/* Outbound & Telemetry Clarity Notice */}
+      <div className="px-4 py-2.5 rounded-xl bg-slate-900/50 border border-slate-800/80 text-[11px] text-slate-400 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-indigo-400 font-bold">● Telemetry Notice:</span>
+          <span>
+            Outbound numbers reflect prospects dispatched to Graph8 sequences following daily batch pacing. Inbound opens, clicks, and sentiment stream in real-time via webhook events.
+          </span>
+        </div>
+        <span className="text-[10px] text-slate-500 hidden sm:inline">Bayesian Laplace Smoothing (k=3.0)</span>
       </div>
 
       {/* Top KPI Metric Cards */}

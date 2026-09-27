@@ -109,17 +109,22 @@ export const Campaigns: React.FC<CampaignsProps> = ({
                         {c.icp_filters?.industry || 'B2B Software'}
                       </div>
                     </div>
-                    <span
-                      className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
-                        c.status === 'active'
-                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                          : c.status === 'completed'
-                          ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
-                          : 'bg-slate-800 text-slate-400 border-slate-700'
-                      }`}
-                    >
-                      {c.status.toUpperCase()}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+                        CYCLE {c.cycle_number || 1}
+                      </span>
+                      <span
+                        className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
+                          c.status === 'active'
+                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                            : c.status === 'completed'
+                            ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
+                            : 'bg-slate-800 text-slate-400 border-slate-700'
+                        }`}
+                      >
+                        {c.status.toUpperCase()}
+                      </span>
+                    </div>
                   </div>
 
                   {/* Cohort & Daily Pacing Pills */}

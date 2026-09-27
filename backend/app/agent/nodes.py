@@ -231,15 +231,12 @@ async def executor_node(state: AgentState) -> AgentState:
 
     logger.info(f"[executor_node] Enrolling {len(unenrolled)} prospects according to dynamic variant allocation.")
 
+    from app.services.scheduler_service import allocate_prospect_to_variant
+    current_counts = {v["id"]: v.get("sends_count", 0) for v in active_variants}
     enrolled = []
-    for i, contact in enumerate(unenrolled):
-        if len(active_variants) == 1:
-            variant = active_variants[0]
-        else:
-            total_alloc = sum([v.get("allocation_percentage", 50.0) for v in active_variants]) or 100.0
-            threshold = (active_variants[0].get("allocation_percentage", 50.0) / total_alloc) * 100.0
-            bucket = (i * 37) % 100
-            variant = active_variants[0] if bucket < threshold else active_variants[1]
+    for contact in unenrolled:
+        variant = allocate_prospect_to_variant(active_variants, current_counts)
+        current_counts[variant["id"]] += 1
 
         custom_subj = variant["subject"].replace("{company}", contact.get("company", "your company")).replace("{name}", contact.get("name", "there"))
         custom_body = variant["body_template"].replace("{company}", contact.get("company", "your company")).replace("{name}", contact.get("name", "there")).replace("{title}", contact.get("title", "leader"))
@@ -498,3 +495,127 @@ async def voice_escalation_node(state: AgentState) -> AgentState:
         await sse_manager.broadcast("approval_created", approval)
 
     return state
+
+async def evaluate_campaign_cycle_milestone(campaign_id: str) -> Dict[str, Any]:
+    """
+    15-Day Optimization Cycle Milestone Evaluator:
+    - Reviews Bayesian scores and conversion telemetry of active variants in the SQLite database.
+    - Scales the highest-performing variant (Champion) to 80% traffic allocation.
+    - Deprecates/throttles the underperformer to low volume or retired.
+    - Breeds an evolutionary challenger (Variant C) via LLM and activates it with 20% traffic (or 50/50 tournament).
+    - Advances the campaign cycle from Cycle N to Cycle N+1 with a fresh 15-day timeline.
+    """
+    campaign = await db.get_campaign(campaign_id)
+    if not campaign:
+        return {"status": "error", "message": f"Campaign {campaign_id} not found"}
+
+    variants = await db.get_variants(campaign_id)
+    active_variants = [v for v in variants if v.get("status") == "active"]
+
+    if not active_variants:
+        return {"status": "error", "message": "No active variants available to evaluate."}
+
+    # 1. Compute Bayesian scores
+    scored = []
+    for v in active_variants:
+        s = compute_variant_score(v)
+        v["score"] = s
+        scored.append(v)
+
+    # Sort descending by score, positive replies, and replies
+    scored.sort(key=lambda x: (x["score"], x.get("positive_replies_count", 0), x.get("replies_count", 0)), reverse=True)
+    champion = scored[0]
+    underperformers = scored[1:]
+
+    # 2. Scale the Champion to 80% traffic
+    await db.update_variant_reinforcement(champion["id"], champion["score"], 80.0)
+
+    # 3. Throttle or retire underperformers
+    retired_ids = []
+    for loser in underperformers:
+        await db.update_variant(loser["id"], status="retired", allocation_percentage=0.0)
+        retired_ids.append(loser["id"])
+
+    # 4. Synthesize evolutionary challenger (Variant C) from Champion
+    selected_ref_ids = campaign.get("reference_email_ids", [])
+    all_refs = await db.get_reference_emails()
+    ref_emails = [r for r in all_refs if r["id"] in selected_ref_ids] if selected_ref_ids else all_refs[:2]
+
+    evolved = llm_client.generate_evolution_variant(
+        winner_variant=champion,
+        reference_emails=ref_emails,
+        icp_filters=campaign.get("icp_filters", {})
+    )
+
+    cycle_num = campaign.get("cycle_number", 1)
+    next_cycle = cycle_num + 1
+
+    variant_label = chr(ord('A') + len(variants)) if len(variants) < 26 else f"V{len(variants)+1}"
+    v_challenger = await db.create_variant({
+        "campaign_id": campaign_id,
+        "channel": "email",
+        "subject": evolved.get("subject", f"Quick question for {{company}} — {champion.get('subject')}"),
+        "body_template": evolved.get("body_template", champion.get("body_template")),
+        "status": "active",
+        "score": 0.0,
+        "allocation_percentage": 20.0
+    })
+
+    # 5. Advance campaign cycle
+    await db.advance_campaign_cycle(
+        campaign_id=campaign_id,
+        cycle_number=next_cycle,
+        champion_id=champion["id"],
+        challenger_id=v_challenger["id"]
+    )
+
+    reasoning = (
+        f"Completed 15-Day Milestone Evaluation for Cycle {cycle_num}. "
+        f"Variant {champion['id'][:8]} crowned Champion (Score: {champion['score']:.3f}, {champion.get('positive_replies_count', 0)} positive replies) "
+        f"and scaled to 80% traffic. Underperformer(s) retired. "
+        f"Evolved Challenger Variant {variant_label} ({v_challenger['id'][:8]}) with 20% traffic allocation for the next 15-day tournament."
+    )
+
+    decision = await db.create_decision({
+        "campaign_id": campaign_id,
+        "decision_type": "cycle_milestone_evaluation",
+        "reasoning": reasoning,
+        "before_state": {"cycle": cycle_num, "variants_active": len(active_variants)},
+        "after_state": {
+            "cycle": next_cycle,
+            "champion_variant_id": champion["id"],
+            "challenger_variant_id": v_challenger["id"],
+            "champion_allocation": 80.0,
+            "challenger_allocation": 20.0
+        },
+        "requires_approval": False
+    })
+
+    await sse_manager.broadcast("agent_decision", decision)
+    await sse_manager.broadcast("cycle_advanced", {
+        "campaign_id": campaign_id,
+        "new_cycle": next_cycle,
+        "champion": champion,
+        "challenger": v_challenger
+    })
+
+    return {
+        "status": "success",
+        "campaign_id": campaign_id,
+        "previous_cycle": cycle_num,
+        "new_cycle": next_cycle,
+        "champion": {
+            "id": champion["id"],
+            "subject": champion["subject"],
+            "score": champion["score"],
+            "allocation_percentage": 80.0
+        },
+        "challenger": {
+            "id": v_challenger["id"],
+            "subject": v_challenger["subject"],
+            "allocation_percentage": 20.0,
+            "label": f"Variant {variant_label}"
+        },
+        "retired_variants": retired_ids,
+        "reasoning": reasoning
+    }

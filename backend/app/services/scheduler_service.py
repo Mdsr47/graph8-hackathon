@@ -8,15 +8,43 @@ from app.services.sse_manager import sse_manager
 
 logger = logging.getLogger("scheduler_service")
 
+def allocate_prospect_to_variant(active_variants: List[Dict[str, Any]], current_counts: Dict[str, int]) -> Dict[str, Any]:
+    """
+    Deterministically allocates a prospect to the variant furthest behind its target quota.
+    Ensures exact proportional distribution:
+    - 50/50 on a batch of 7 produces exactly 4 and 3, and across 14 produces exactly 7 and 7.
+    - 80/20 produces exactly 80% to Champion and 20% to Challenger.
+    """
+    if len(active_variants) == 1:
+        return active_variants[0]
+
+    total_assigned = sum(current_counts.get(v["id"], 0) for v in active_variants)
+    total_weight = sum(v.get("allocation_percentage", 50.0) for v in active_variants) or 100.0
+
+    best_variant = active_variants[0]
+    max_deficit = -float("inf")
+
+    for v in active_variants:
+        target_pct = (v.get("allocation_percentage", 50.0) / total_weight)
+        target_count = (total_assigned + 1) * target_pct
+        current_count = current_counts.get(v["id"], 0)
+        deficit = target_count - current_count
+        if deficit > max_deficit:
+            max_deficit = deficit
+            best_variant = v
+
+    return best_variant
+
 class SchedulerService:
     def __init__(self):
         self._running = False
         self._task: Optional[asyncio.Task] = None
 
-    async def process_daily_batch(self, campaign_id: str) -> Dict[str, Any]:
+    async def process_daily_batch(self, campaign_id: str, force: bool = False) -> Dict[str, Any]:
         """
         Pushes the next daily quota of remaining 'new' prospects into the campaign's active sequence.
-        Matches the Graph8 daily pacing and automated scheduler spec.
+        Strictly enforces daily_limit unless force=True (manual user trigger).
+        Allocates variants using strict deterministic proportional balancing (no modulo hashing).
         """
         campaign = await db.get_campaign(campaign_id)
         if not campaign:
@@ -38,6 +66,21 @@ class SchedulerService:
 
         daily_limit = campaign.get("daily_limit", 50)
         sent_today = campaign.get("sent_today", 0)
+
+        # Enforce daily pacing limit
+        if not force:
+            quota_remaining = max(0, daily_limit - sent_today)
+            if quota_remaining <= 0:
+                logger.info(f"[Scheduler] Campaign {campaign_id} already reached daily limit of {daily_limit} today ({sent_today}/{daily_limit} sent).")
+                return {
+                    "status": "quota_reached",
+                    "message": f"Daily limit of {daily_limit} already reached today ({sent_today}/{daily_limit} sent). Next batch runs tomorrow.",
+                    "sent_today": sent_today,
+                    "daily_limit": daily_limit
+                }
+            batch_size = quota_remaining
+        else:
+            batch_size = daily_limit
 
         # Get active variants
         variants = await db.get_variants(campaign_id)
@@ -62,19 +105,16 @@ class SchedulerService:
             await sse_manager.broadcast("agent_decision", decision)
             return {"status": "completed", "message": "All target prospects for this campaign are already enrolled."}
 
-        # Take next daily batch
-        batch = new_contacts[:daily_limit]
+        # Take next daily batch up to batch_size
+        batch = new_contacts[:batch_size]
         enrolled_count = 0
 
-        for i, contact in enumerate(batch):
-            # Dynamic A/B allocation
-            if len(active_variants) == 1:
-                variant = active_variants[0]
-            else:
-                total_alloc = sum([v.get("allocation_percentage", 50.0) for v in active_variants]) or 100.0
-                threshold = (active_variants[0].get("allocation_percentage", 50.0) / total_alloc) * 100.0
-                bucket = (i * 37) % 100
-                variant = active_variants[0] if bucket < threshold else active_variants[1]
+        # Maintain cumulative counts for exact proportional allocation
+        current_counts = {v["id"]: v.get("sends_count", 0) for v in active_variants}
+
+        for contact in batch:
+            variant = allocate_prospect_to_variant(active_variants, current_counts)
+            current_counts[variant["id"]] += 1
 
             custom_subj = variant["subject"].replace("{company}", contact.get("company", "your company")).replace("{name}", contact.get("name", "there"))
             custom_body = variant["body_template"].replace("{company}", contact.get("company", "your company")).replace("{name}", contact.get("name", "there")).replace("{title}", contact.get("title", "leader"))
@@ -112,12 +152,14 @@ class SchedulerService:
         await db.update_campaign_pacing(campaign_id, enrolled_count)
 
         remaining_count = len(new_contacts) - enrolled_count
+        new_sent_today = sent_today + enrolled_count
+
         decision = await db.create_decision({
             "campaign_id": campaign_id,
             "decision_type": "daily_batch_dispatched",
-            "reasoning": f"Pushed daily batch of {enrolled_count} prospects into sequence across active A/B variants. Remaining pending prospects: {remaining_count}.",
-            "before_state": {"pending_before": len(new_contacts)},
-            "after_state": {"enrolled_in_batch": enrolled_count, "remaining_pending": remaining_count},
+            "reasoning": f"Pushed daily batch of {enrolled_count} prospects into sequence across active A/B variants. Daily quota used: {new_sent_today}/{daily_limit}. Remaining pending prospects: {remaining_count}.",
+            "before_state": {"pending_before": len(new_contacts), "sent_today_before": sent_today},
+            "after_state": {"enrolled_in_batch": enrolled_count, "remaining_pending": remaining_count, "sent_today_after": new_sent_today},
             "requires_approval": False
         })
 
@@ -125,13 +167,16 @@ class SchedulerService:
         await sse_manager.broadcast("campaign_batch_dispatched", {
             "campaign_id": campaign_id,
             "enrolled_count": enrolled_count,
-            "remaining_count": remaining_count
+            "remaining_count": remaining_count,
+            "sent_today": new_sent_today,
+            "daily_limit": daily_limit
         })
 
         return {
             "status": "success",
             "enrolled_count": enrolled_count,
             "remaining_count": remaining_count,
+            "sent_today": new_sent_today,
             "daily_limit": daily_limit
         }
 
@@ -159,21 +204,26 @@ class SchedulerService:
                         continue
 
                     last_run = camp.get("last_batch_run_at")
+                    sent_today = camp.get("sent_today", 0)
                     should_run = False
+
                     if not last_run:
-                        # Never run yet, check if there are contacts
-                        should_run = True
+                        # Only run if no sends today and campaign has never been run
+                        if sent_today == 0:
+                            should_run = True
                     else:
                         try:
                             last_dt = datetime.fromisoformat(last_run)
-                            # If more than 24 hours passed, reset daily quota and run batch
-                            if (now - last_dt) >= timedelta(hours=24):
+                            # If 24 hours passed or calendar date has rolled over UTC
+                            if (now - last_dt) >= timedelta(hours=24) or now.date() > last_dt.date():
+                                # Reset sent_today for the new day
+                                await db.reset_campaign_daily_pacing(camp["id"])
                                 should_run = True
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.warning(f"Error parsing last_batch_run_at: {e}")
 
                     if should_run:
-                        await self.process_daily_batch(camp["id"])
+                        await self.process_daily_batch(camp["id"], force=False)
 
             except asyncio.CancelledError:
                 break

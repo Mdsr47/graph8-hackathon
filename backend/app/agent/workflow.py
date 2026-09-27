@@ -40,7 +40,8 @@ def build_workflow():
     builder.set_entry_point("signal_node")
     builder.add_edge("signal_node", "enrichment_node")
     builder.add_edge("enrichment_node", "variant_generator_node")
-    builder.add_edge("variant_generator_node", "executor_node")
+    builder.add_edge("variant_generator_node", END)
+    # executor_node is triggered upon Human-in-the-Loop approval and daily pacing cycles
     builder.add_edge("executor_node", END)
 
     # 3. Cyclical Feedback & Reallocation Graph

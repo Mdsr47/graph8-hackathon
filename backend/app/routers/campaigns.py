@@ -56,7 +56,13 @@ async def create_campaign(req: CampaignCreate, background_tasks: BackgroundTasks
 @router.post("/{campaign_id}/run-daily-batch")
 async def run_daily_batch(campaign_id: str):
     from app.services.scheduler_service import scheduler_service
-    res = await scheduler_service.process_daily_batch(campaign_id)
+    res = await scheduler_service.process_daily_batch(campaign_id, force=True)
+    return res
+
+@router.post("/{campaign_id}/evaluate-cycle-milestone")
+async def evaluate_cycle_milestone(campaign_id: str):
+    from app.agent.nodes import evaluate_campaign_cycle_milestone
+    res = await evaluate_campaign_cycle_milestone(campaign_id)
     return res
 
 @router.get("/{campaign_id}")
