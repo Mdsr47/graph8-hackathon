@@ -132,6 +132,15 @@ You MUST strictly incorporate this feedback, discard the previous weak pitch ang
         ]
         return self.generate(messages, temperature=0.5).strip()
 
+    def generate_inbox_reply(self, prospect_name: str, company: str, reply_body: str, sentiment: str = "positive") -> str:
+        """Drafts an intelligent AI response to an inbound reply from a prospect."""
+        return self.draft_reply(
+            original_pitch="Autonomous RevOps Outbound & Self-Healing Pipeline",
+            prospect_reply=reply_body,
+            prospect_name=prospect_name,
+            company=company
+        )
+
     def generate_evolution_variant(
         self,
         winner_variant: Dict[str, Any],

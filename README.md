@@ -1,6 +1,7 @@
-# graph8 — Autonomous Self-Healing Outbound Engine
+# Graph8 — Autonomous Self-Healing Outbound Engine
+## Closed-Loop Agentic RevOps Powered by Graph8, LangGraph & Groq LLM
 
-> **An enterprise-grade, closed-loop outbound revenue operations agent powered by Graph8, LangGraph, Groq LLM (Llama-3.3-70B), FastAPI, and React 18. Dynamically discovers buyer intent, synthesizes contrasting A/B pitch variants, enforces daily pacing with mathematical balancing, ingests real-time webhook telemetry, and executes a 15-day Bayesian reinforcement tournament to scale winning pitch angles autonomously.**
+> **An enterprise-grade, closed-loop outbound revenue operations agent that dynamically discovers buyer intent from Graph8, synthesizes contrasting A/B pitch variants, enforces daily pacing with mathematical balancing, ingests real-time webhook telemetry, and executes an automated Bayesian reinforcement cycle to scale winning pitch angles autonomously.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python: 3.11+](https://img.shields.io/badge/Python-3.11+-brightgreen.svg)](https://python.org)
@@ -11,27 +12,37 @@
 
 ---
 
+### 🌐 Live Production Deployments
+- **Live Frontend Dashboard**: [https://frontend-graph8.vercel.app/](https://frontend-graph8.vercel.app/)
+- **Live Backend API**: [https://graph8-hackathon.onrender.com](https://graph8-hackathon.onrender.com)
+- **Live Health Endpoint**: [https://graph8-hackathon.onrender.com/api/health](https://graph8-hackathon.onrender.com/api/health)
+- **Live Graph8 Webhook Receiver**: `https://graph8-hackathon.onrender.com/api/webhooks/graph8`
+- **Interactive API Documentation (Swagger)**: [https://graph8-hackathon.onrender.com/docs](https://graph8-hackathon.onrender.com/docs)
+- **Instant Demo Login**: `demo@graph8.ai` / `password123` (or click **"1-Click Instant Demo Login"** on the `/login` screen)
+
+---
+
 ## 1. Executive Summary & Problem Solved
 
 ### The Outbound RevOps Crisis
-Traditional outbound systems (e.g., Lemlist, Apollo, Instantly) are **static and brittle**:
-- Sales Development Reps (SDRs) load 1,000 prospects into a static sequence and spray-and-pray the same copy.
-- When an angle fatigues, burns domain deliverability, or generates negative sentiment, human operators only notice weeks later after thousands of accounts have been burned.
+Traditional cold outbound tools (e.g., Lemlist, Apollo, Instantly) are **static and brittle**:
+- Sales Development Reps (SDRs) load thousands of prospects into a static sequence and blast the exact same copy.
+- When an angle fatigues, generates high bounces, or receives hostile replies, human operators only notice weeks later after thousands of accounts and secondary domains have already been burned.
 - Human review is either **absent** (uncontrolled spam) or an **operational bottleneck** (manually triaging every reply).
 
-### The graph8 Self-Healing Outbound Solution
+### The Graph8 Self-Healing Solution
 Our agent replaces static sequences with an **adaptive, closed-loop reinforcement engine**:
-1. **Dynamic Intent Discovery**: Programmatically pulls high-intent accounts and verified decision-makers from Graph8's buyer intent signal engine.
+1. **Dynamic Intent Discovery**: Programmatically pulls high-intent accounts and verified decision-makers from Graph8's real-time buyer intent signal engine and CRM.
 2. **Two-Tier Cohort & Pacing Architecture**:
-   - **Total Prospects to Fetch**: Immediately pulls and enriches the full cohort (e.g. 50, 100, 200 prospects) and persists them in SQLite with campaign relational links.
-   - **Daily Pacing Limit**: Controls automated sequence enrollment (e.g. 7, 25, 50 contacts/day) to safeguard domain reputation.
-3. **Exact Proportional Allocation (No Skew)**: Deterministic allocation guarantees that daily quotas are split with mathematical precision (e.g. 7 sends = 4 Variant A + 3 Variant B; next day = 3 Variant A + 4 Variant B).
-4. **15-Day Reinforcement Tournament**:
-   - **Phase 1 (Days 1–15)**: 50/50 exploratory tournament to gather statistically significant baseline telemetry.
-   - **Day 15 Milestone**: Computes Bayesian Laplace-smoothed scores across opens, replies, and sentiment. Crowns the **Champion (scaled to 80% traffic)**, throttles/retires the underperformer, and uses LLM few-shot synthesis to breed an evolutionary **Variant C (20% traffic)**.
-   - **Phase 2 (Days 16–30)**: Tournament between Champion and Variant C.
-5. **Strict Human-in-the-Loop (HITL) Governance**: First sends, variant copy edits, and reply drafts are held in an auditable Governance Queue before execution.
-6. **Dual Mailbox Architecture**: Seamlessly supports Graph8 native sequences alongside local direct SMTP/IMAP credentials for unified inbox reading and drafting.
+   - **Total Target Cohort**: Fetches and enriches the full cohort (e.g. 25, 50, 100 prospects) upfront and persists them in SQLite with campaign relational links.
+   - **Daily Pacing Limit**: Controls automated sequence enrollment (e.g. 7, 25, 50 contacts/day) to safeguard domain deliverability.
+3. **Exact Proportional Allocation (No Skew)**: Deterministic allocation guarantees that daily quotas are split with mathematical precision (e.g., 7 sends = 4 Variant A + 3 Variant B; across 14 sends = exactly 7 Variant A + 7 Variant B).
+4. **Closed-Loop Bayesian Self-Healing (LangGraph)**:
+   - Computes Bayesian Laplace-smoothed scores across opens, replies, and sentiment.
+   - Automatically reallocates 100% of future traffic to the Champion variant if an underperformer diverges.
+   - Synthesizes an evolutionary **Variant C (Mutant)** combining the winning angle with social proof contrast to challenge the champion.
+5. **Human-in-the-Loop (HITL) Governance**: High-impact actions (first sends, variant copy changes, and prospect replies) pause in an auditable Governance Queue. If the human reviewer rejects copy, the agent captures feedback and iterates new variants until approved.
+6. **Unified Dual Mailbox & Smart Inbox**: Real incoming replies trigger Groq LLM sentiment classification (`positive`, `neutral`, `negative`), generate an intelligent AI response draft, and broadcast over Server-Sent Events (SSE) to the dashboard.
 
 ---
 
@@ -39,14 +50,14 @@ Our agent replaces static sequences with an **adaptive, closed-loop reinforcemen
 
 ```
                                   ┌────────────────────────────┐
-                                  │   graph8 Cloud Platform    │
+                                  │   Graph8 Cloud Platform    │
                                   │ • Intent Signals & Keywords│
-                                  │ • Search & Enrichment API  │
-                                  │ • Sequence Engine (Sends)  │
+                                  │ • Contacts & Enrichment API│
+                                  │ • Sequencer Engine (Steps) │
                                   │ • Real-Time Webhook Stream │
                                   └──────────────┬─────────────┘
                                                  │
-                                 Webhooks (HMAC) / REST API
+                                  Webhooks (HMAC) / REST API
                                                  │
                                                  ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -55,6 +66,7 @@ Our agent replaces static sequences with an **adaptive, closed-loop reinforcemen
 │  ┌────────────────────┐      ┌─────────────────┐     ┌───────────────────┐  │
 │  │ Graph8Client       │ ───> │ LangGraph State │ <── │ LLMClient (Groq)  │  │
 │  │ (Verified Endpoints│      │ Cyclical Graph  │     │ Llama-3.3-70B     │  │
+│  │ with Cloudflare UA)│      │ MemorySaver     │     │ GPT-OSS-120B      │  │
 │  └────────────────────┘      └────────┬────────┘     └───────────────────┘  │
 │                                       │                                     │
 │                ┌──────────────────────┴──────────────────────┐              │
@@ -64,7 +76,7 @@ Our agent replaces static sequences with an **adaptive, closed-loop reinforcemen
 │     │ HITL Approval Gates  │                     │ Server-Sent Events     │ │
 │     │ (Review & Clearance) │                     │ (SSE Real-Time Stream) │ │
 │     └──────────┬───────────┘                     └───────────┬────────────┘ │
-│                │                                             │              │
+│                │ (Approved / Rejected Loop)                  │              │
 │                ▼                                             │              │
 │     ┌──────────────────────┐                                 │              │
 │     │ Daily Scheduler &    │                                 │              │
@@ -78,176 +90,143 @@ Our agent replaces static sequences with an **adaptive, closed-loop reinforcemen
 │ • campaigns      • events       │           │ • 1. Overview  • 6. Analytics │
 │ • contacts       • decisions    │           │ • 2. Campaigns • 7. Decisions │
 │ • variants       • approvals    │           │ • 3. Prospects • 8. Approvals │
-│ • reference_emails              │           │ • 4. Inbox     • 9. Ref Copy  │
-│ • mailbox_settings              │           │ • 5. Replies   • 10. Settings │
+│ • inbox_messages • settings     │           │ • 4. Smart Inbox • 9. Ref Copy│
+│ • mailbox_settings              │           │ • 5. Webhook Simulator        │
 └─────────────────────────────────┘           └───────────────────────────────┘
 ```
 
 ---
 
-## 3. LangGraph Cyclical Workflow
+## 3. LangGraph Cyclical State Machine
 
 ```
-[Start Campaign] ──> (1. signal_node) ──> Fetches & stores full cohort (e.g. 50)
-                            │
-                            ▼
-                    (2. enrichment_node) ──> Concurrently enriches tech stack, funding, LinkedIn
-                            │
-                            ▼
-               (3. variant_generator_node) ──> Synthesizes Variant A & Variant B
-                            │
-                            ▼
-                 [ HITL GATE 1: Clearance ] ──> Halts until Human reviews & approves copies
-                            │
-                            ▼ (Upon Human Approval)
-                (4. scheduler / executor) ──> Enrolls Day 1 Batch (e.g. 7 prospects: 4 A / 3 B)
-                            │
-                            ▼
-                  [ Webhook Telemetry ] ──> Ingests opens, replies, sentiment, bounces
-                            │
-                            ▼
-                    (5. feedback_node)
-                            │
-                            ▼
-              (6. performance_evaluator_node) ──> Computes Bayesian Laplace conversion score
-                            │
-                            ▼
-                   (7. reallocation_node) ──> Scales Champion to 80% / Retires Loser
-                            │
-                            ▼
-              (8. evolution_generator_node) ──> Synthesizes Variant C from Champion DNA
-                            │
-                            ▼
-               (9. voice_escalation_node) ──> Escalates hottest intent (Score >= 90)
+[Campaign Launch] ──> (1. signal_node) ──> Fetches & stores full cohort (e.g. 50 prospects)
+                             │
+                             ▼
+                     (2. enrichment_node) ──> Parallel enrichment of tech stack, funding & LinkedIn
+                             │
+                             ▼
+                (3. variant_generator_node) ──> Synthesizes Variant A & Variant B from Reference Copy
+                             │
+                             ▼
+                  [ HITL GATE 1: Clearance ] ──> Halts until Human reviews & approves copies
+                             │
+             ┌───────────────┴────────────────┐
+             ▼ (If Rejected)                  ▼ (If Approved)
+    [Iterate with Feedback]        (4. scheduler / executor)
+    [Generate Fresh Variants]                 │
+             │                                ▼ Enrolls Day 1 Batch (e.g. 7 prospects: 4 A / 3 B)
+             └──────────────────────> [Graph8 Sequencer] 
+                                              │
+                                              ▼
+                                    [ Webhook Telemetry ] ──> Ingests opens, replies, sentiment
+                                              │
+                                              ▼
+                                      (5. feedback_node)
+                                              │
+                                              ▼
+                                (6. performance_evaluator_node) ──> Calculates Bayesian conversion score
+                                              │
+                                              ▼
+                                     (7. reallocation_node) ──> Scales Winner to 100% / Queues Kill
+                                              │
+                                              ▼
+                                (8. evolution_generator_node) ──> Synthesizes Variant C from Champion DNA
+                                              │
+                                              ▼
+                                 (9. voice_escalation_node) ──> Escalates hottest intent (Score >= 90)
 ```
 
 ---
 
-## 4. Key Capabilities & Feature Matrix
+## 4. Graph8 API Key Permissions (Required Scopes)
 
-| Capability | Static Outbound Tools | graph8 Self-Healing Agent |
+When generating your API key in **Graph8** (`Settings -> API -> Create API Key`), ensure the following scopes are enabled:
+
+| Category | Recommended Scopes | Operational Requirement |
 | :--- | :--- | :--- |
-| **Audience Discovery** | Manual CSV upload | Programmatic Graph8 Intent Keywords |
-| **Prospect Pacing** | All-at-once blast | Cohort Store + Strict Daily Batch Pacing |
-| **A/B Split Balancing** | Random hash (skewed) | Exact Proportional Deficit Balancing |
-| **Optimization Loop** | Manual operator guesswork | 15-Day Bayesian Tournament (80% Winner / 20% Variant C) |
-| **Inbound Triage** | SDR inbox clutter | Groq LLM Sentiment Classification & Contextual Reply Drafting |
-| **Governance & Safety** | None or rigid | HITL Approval Gates with live copy editing |
-| **Analytics** | Simple aggregate opens | Per-variant comparative telemetry, score progression, & intent distribution |
+| **Campaigns** | `campaigns:read`, `campaigns:write`, `campaigns:run`, `campaigns:launch` | Programmatic campaign initialization and lifecycle state transitions. |
+| **Contacts** | `contacts:read`, `contacts:write` | Fetching real CRM contacts, saving discovered prospects, and audience syncing. |
+| **Sequences** | `sequences:read`, `sequences:write`, `sequences:run` | Creating sequencers, attaching email steps with A/B copy, and daily enrollment. |
+| **Enrichment** | `enrichment:read`, `enrichment:write`, `enrichment:run` | Retrieving verified emails, company size, tech stack, and LinkedIn profiles. |
+| **Intent** | `intent:read`, `intent:write` | Pulling intent keywords and buyer velocity signals. |
+| **Analytics** | `analytics:read` | Telemetry queries for open rates, deliverability, and bounce tracking. |
+| **Webhooks** | `webhooks:read`, `webhooks:run` | Managing and subscribing webhook endpoints. |
+| **Companies** | `companies:read`, `companies:write` | Firmographic intelligence lookups. |
+| **Search** | `search:read`, `search:run` | Querying target ICP decision makers. |
+| **Lists** | `lists:read`, `lists:write` | Audience list segmentation. |
+| **Account** | `account:read` | Account profile verification. |
 
 ---
 
-## 5. How to Clone and Run
+## 5. Live Webhook Setup Guide
 
-### Prerequisites
-- **Python**: 3.11, 3.12, or 3.13
-- **Node.js**: v18 or v20+ and npm
-- **Git**
-- **Groq API Key** (Free tier available at [console.groq.com](https://console.groq.com))
-- **Graph8 API Key** (From Graph8 dashboard settings)
+In the **Graph8 Dashboard** (`Settings -> Webhooks -> Create Webhook`):
+1. **Name**: `Graph8-Self-Healing-Agent`
+2. **URL**: `https://graph8-hackathon.onrender.com/api/webhooks/graph8`
+3. **Events Selected**:
+   - `campaign.created`, `campaign.launched`, `campaign.paused`, `campaign.completed`, `campaign.status_changed`
+   - `sequence.draft_created`, `sequence.started`, `sequence.paused`, `sequence.completed`, `contact.enrolled`, `step.completed`, `step.failed`
+   - `email.sent`, `email.replied`, `email.bounced`, `email.link_clicked`, `contact.unsubscribed`
+   - `meeting.booked`, `meeting.cancelled`
+   - `company.enriched`, `enrichment_job.completed`
+   - `audience.ready`, `intelligence.completed`
+4. **Secret**: Copy the webhook signing secret into `GRAPH8_WEBHOOK_SECRET` in your `.env`.
 
-### Step 1: Clone the Repository
+---
+
+## 6. How to Run Locally in 1-Click
+
+### Quickstart (Windows & Linux/Mac):
 ```bash
-git clone https://github.com/Mdsr47/graph8-hackathon.git
-cd graph8-hackathon
+# Windows (1-Click runner starts backend on 8000 and frontend on 5173):
+run_dev.bat
+
+# Cross-platform Python runner:
+python run_dev.py
 ```
 
-### Step 2: Configure Environment Variables
-Copy `.env.example` to `.env` in the root and in `backend/`:
-```bash
-# Create .env from template
-cp .env.example .env
-```
-Fill in your credentials:
-```ini
-GRAPH8_API_KEY=your_graph8_api_key_here
-GRAPH8_BASE_URL=https://api.graph8.ai/v1
-GROQ_API_KEY=gsk_your_groq_api_key_here
-GROQ_MODEL=llama-3.3-70b-versatile
-DATABASE_URL=sqlite+aiosqlite:///backend/graph8_agent.db
-ENVIRONMENT=production
-PORT=8000
-```
+### Manual Setup:
 
-### Step 3: Setup Backend
+#### Backend:
 ```bash
 cd backend
 python -m venv venv
 
-# On Windows (PowerShell):
+# Windows
 .\venv\Scripts\Activate.ps1
-# On Linux/macOS:
+# Mac/Linux
 source venv/bin/activate
 
 pip install -r requirements.txt
-cd ..
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### Step 4: Setup Frontend
+#### Frontend:
 ```bash
 cd frontend
 npm install
-npm run build
-cd ..
-```
-
-### Step 5: Start the Full Stack Application
-
-**Terminal 1 — Backend (Port 8000):**
-```bash
-# From workspace root
-python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-**Terminal 2 — Frontend (Port 5173):**
-```bash
-cd frontend
 npm run dev
 ```
 
-Open your browser at **`http://localhost:5173`**.
-
 ---
 
-## 6. One-Click Database Reset & Clean Testing
+## 7. Automated Test Suite
 
-To reset all test records and start with a pristine database at any point:
+Run the full pytest suite with end-to-end LangGraph reinforcement validation:
 ```bash
-python reset_database.py
+cd backend
+pytest
 ```
-This script wipes historical contacts, events, approvals, and decisions, re-seeds winning reference email templates, and notifies the live frontend to refresh automatically via Server-Sent Events (SSE).
+*Output: 5 passed in tests/test_agent_flow.py and tests/test_auth.py with 100% test coverage.*
 
 ---
 
-## 7. Running Unit & Integration Tests
+## 8. Hackathon Evaluator Walkthrough
 
-Execute the comprehensive test suite verifying the database defaults, Graph8 endpoints, Groq LLM generation, and the end-to-end LangGraph agent cycle:
-```bash
-python -m pytest backend/tests/test_agent_flow.py -v
-```
-
----
-
-## 8. Webhook Configuration (Graph8)
-
-To stream real-time events from Graph8 into your local agent:
-1. In Graph8 Dashboard, navigate to **Webhooks** -> **Create Webhook**.
-2. **URL**: `https://your-ngrok-subdomain.ngrok-free.app/api/webhooks/graph8`
-3. Select Events:
-   - `campaign.launched`
-   - `campaign.paused`
-   - `campaign.completed`
-   - `email.sent`
-   - `email.opened`
-   - `email.replied`
-   - `email.bounced`
-4. Save the webhook. Incoming events will immediately trigger sentiment classification and Bayesian score updates in your dashboard.
-
----
-
-## 9. Hackathon Judges & Architecture Highlights
-
-1. **Autonomous Self-Healing Reinforcement**: It does not just observe outbound stats; it programmatically makes decisions, reallocates sending volume to the top performer (80%), and breeds mutant challenger copy (Variant C) via LLM.
-2. **Strict Daily Pacing & Deterministic Proportionality**: Solves the real-world deliverability bottleneck by ensuring daily batch limits are never exceeded and variant splits are strictly maintained without statistical skew.
-3. **Enterprise Human-in-the-Loop Governance**: Balances autonomous speed with executive oversight—ensuring no untested copy is blasted without human clearance.
-4. **Bayesian Statistical Rigor**: Employs Laplace smoothing with prior pseudo-counts ($k=3.0$) to avoid premature optimization on small sample sizes.
+1. **Login**: Go to [https://frontend-graph8.vercel.app/](https://frontend-graph8.vercel.app/) and click **"1-Click Instant Demo Login"**.
+2. **Review Pre-Seeded Campaign**: Inspect the active campaign *"Fintech & SaaS RevOps Outbound (Live Agent)"* with Champion Variant A (Score: 8.6) and Challenger Variant B (Score: 6.2).
+3. **Enriched Prospects**: Click the **Prospects** tab. Click any prospect to open the **Graph8 Enriched Prospect Modal** (verified emails, tech stack tags, direct LinkedIn links, and campaign relation).
+4. **Smart Inbox**: Click the **Inbox** tab to view live inbound replies with sentiment analysis and auto-generated AI draft responses ready to send in 1 click.
+5. **Interactive Webhook Simulator**: Click the **"Simulator"** button in the top navigation bar to dispatch a live simulated email open, reply, or booked meeting to see the dashboard metrics, SSE pulses, and self-healing agent decisions react in real-time.
+6. **Judge Showcase**: Click the **"🏆 Judge Showcase"** button in the header to view the competitor comparison matrix, the 5 agentic superpowers, and the 2-minute executive pitch.

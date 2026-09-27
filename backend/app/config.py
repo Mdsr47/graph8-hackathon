@@ -25,7 +25,7 @@ class Settings(BaseModel):
     SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "")
     
     # Webhooks & Server
-    WEBHOOK_BASE_URL: str = os.getenv("WEBHOOK_BASE_URL", "http://localhost:8000")
+    WEBHOOK_BASE_URL: str = os.getenv("WEBHOOK_BASE_URL", "https://graph8-hackathon.onrender.com")
     PORT: int = int(os.getenv("PORT", "8000"))
     HOST: str = os.getenv("HOST", "0.0.0.0")
     

@@ -8,8 +8,8 @@ This guide provides an end-to-end overview of the **Autonomous Self-Healing RevO
 ## 1. System Architecture & Live Deployment
 
 The system is deployed in a production decoupling architecture:
-- **Frontend (UI & Dashboard)**: Hosted on Vercel at `https://graph8-hackathon-1.vercel.app` (or your designated Vercel domain). Configured with automatic edge proxy rewrites to eliminate CORS and route `/api/*` directly to Render.
-- **Backend (Agent & Engine)**: Hosted on Render at `https://graph8-hackathon.onrender.com`. Runs 24/7 on an asynchronous Python 3.12 container running FastAPI, SQLite database, LangGraph state engine, and an automated background scheduler.
+- **Frontend (UI & Dashboard)**: Hosted on Vercel at [https://frontend-graph8.vercel.app/](https://frontend-graph8.vercel.app/). Configured with automatic edge proxy rewrites to eliminate CORS and route `/api/*` directly to Render.
+- **Backend (Agent & Engine)**: Hosted on Render at [https://graph8-hackathon.onrender.com](https://graph8-hackathon.onrender.com). Runs 24/7 on an asynchronous Python 3.12 container running FastAPI, SQLite database, LangGraph state engine, and an automated background scheduler.
 - **Webhooks**: Live receiver configured at `https://graph8-hackathon.onrender.com/api/webhooks/graph8`.
 
 ```

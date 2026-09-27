@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter
 from typing import Dict, Any
 from app.config import settings
@@ -27,6 +28,12 @@ async def get_settings():
     masked_g8 = f"g8_...{settings.GRAPH8_API_KEY[-4:]}" if len(settings.GRAPH8_API_KEY) > 8 else ("Configured" if settings.GRAPH8_API_KEY else "Not Configured")
     masked_llm = f"...{settings.LLM_API_KEY[-4:]}" if len(settings.LLM_API_KEY) > 8 else ("Configured" if settings.LLM_API_KEY else "Not Configured")
 
+    # Resolve live webhook host (prefer Render external URL or production base)
+    wh_host = os.getenv("RENDER_EXTERNAL_URL") or settings.WEBHOOK_BASE_URL
+    if not wh_host or "localhost" in wh_host or "ngrok" in wh_host:
+        wh_host = "https://graph8-hackathon.onrender.com"
+    webhook_endpoint = f"{wh_host.rstrip('/')}/api/webhooks/graph8"
+
     return {
         "graph8_api_key_status": masked_g8,
         "graph8_base_url": settings.GRAPH8_BASE_URL,
@@ -35,7 +42,7 @@ async def get_settings():
         "llm_base_url": settings.LLM_BASE_URL,
         "llm_api_key_status": masked_llm,
         "supabase_configured": bool(settings.SUPABASE_URL and "your-project" not in settings.SUPABASE_URL),
-        "webhook_url": f"{settings.WEBHOOK_BASE_URL.rstrip('/')}/api/webhooks/graph8",
+        "webhook_url": webhook_endpoint,
         "simulation_mode": settings.SIMULATION_MODE,
         "voice_escalation": {
             "enabled": settings.VOICE_ESCALATION_ENABLED,
