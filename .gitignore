@@ -22,10 +22,8 @@ htmlcov/
 .tox/
 
 # Local databases
-*.db
-*.sqlite
-*.sqlite3
-backend/graph8_agent.db
+# *.db
+# backend/graph8_agent.db
 backend/graph8_agent_v2.db
 
 # Virtual environments

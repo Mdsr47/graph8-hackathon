@@ -342,6 +342,147 @@ class Database:
                 user_id="usr_demo_01"
             )
 
+        # Ensure demo campaign and rich live metrics exist
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            c_cur = await db.execute("SELECT COUNT(*) FROM campaigns")
+            camp_count = (await c_cur.fetchone())[0]
+
+        if camp_count == 0:
+            now_str = datetime.now(timezone.utc).isoformat()
+            demo_cid = "cmp_demo_hackathon_01"
+            var_a_id = "var_champion_01"
+            var_b_id = "var_challenger_02"
+
+            async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+                await db.execute("""
+                    INSERT INTO campaigns (
+                        id, name, status, icp_filters, reference_email_ids, 
+                        daily_limit, target_contacts_limit, sent_today, 
+                        cycle_number, cycle_start_date, cycle_duration_days, 
+                        champion_variant_id, challenger_variant_id, created_at, org_id, user_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    demo_cid,
+                    "Fintech & SaaS RevOps Outbound (Live Agent)",
+                    "active",
+                    json.dumps({"industry": "SaaS & RevOps", "target_titles": ["VP Sales", "Head of RevOps", "CRO"]}),
+                    json.dumps([]),
+                    25, 50, 7,
+                    1, now_str, 15,
+                    var_a_id, var_b_id, now_str, "org_demo_01", "usr_demo_01"
+                ))
+
+                await db.execute("""
+                    INSERT INTO variants (
+                        id, campaign_id, channel, subject, body_template, 
+                        status, sends_count, opens_count, replies_count, 
+                        positive_replies_count, meetings_count, score, 
+                        allocation_percentage, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    var_a_id, demo_cid, "email",
+                    "Autonomous Outbound & Self-Healing Pipeline for {company}",
+                    "Hi {name},\n\nNoticed {company} is scaling revenue operations this quarter. Most sales leaders we talk to struggle with burning outbound domains on cold lists.\n\nOur self-healing engine dynamically rewires email copy based on open and sentiment telemetry.\n\nOpen to a brief peek this Thursday?\n\nBest,\nAlex",
+                    "active", 14, 11, 4, 3, 2, 8.6, 50.0, now_str
+                ))
+
+                await db.execute("""
+                    INSERT INTO variants (
+                        id, campaign_id, channel, subject, body_template, 
+                        status, sends_count, opens_count, replies_count, 
+                        positive_replies_count, meetings_count, score, 
+                        allocation_percentage, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    var_b_id, demo_cid, "email",
+                    "Solving intent drop-off and domain burn at {company}",
+                    "Hi {name},\n\nSaw high intent activity on revenue operations from your team recently.\n\nTraditional sequences keep sending generic copy even after interest signals shift. We built an autonomous closed-loop agent that protects sender reputation.\n\nWould you be against seeing a 2-minute demo?\n\nCheers,\nAlex",
+                    "active", 10, 7, 2, 1, 1, 6.2, 50.0, now_str
+                ))
+
+                contacts_data = [
+                    ("cnt_01", demo_cid, "Sarah Jenkins", "sarah.jenkins@cloudscale.ai", "VP of Sales", "CloudScale AI", 94, "enrolled", {"verified": True, "company_size": "250-500", "tech_stack": ["Salesforce", "HubSpot"]}),
+                    ("cnt_02", demo_cid, "David Chen", "david.chen@datastream.io", "Head of RevOps", "Datastream", 89, "replied", {"verified": True, "company_size": "100-250", "tech_stack": ["Outreach", "Apollo"]}),
+                    ("cnt_03", demo_cid, "Elena Rostova", "elena@nextgenfintech.com", "Chief Revenue Officer", "NextGen Fintech", 96, "meeting_booked", {"verified": True, "company_size": "500-1000", "tech_stack": ["Salesforce", "Gong"]}),
+                    ("cnt_04", demo_cid, "Marcus Brody", "marcus@apexlabs.dev", "Director of Growth", "Apex Labs", 85, "new", {"verified": True, "company_size": "50-100", "tech_stack": ["HubSpot"]}),
+                    ("cnt_05", demo_cid, "Priya Patel", "priya@scaleflow.io", "VP Revenue Operations", "ScaleFlow", 91, "new", {"verified": True, "company_size": "200-500", "tech_stack": ["Salesforce", "Apollo"]}),
+                ]
+
+                for cid_c, camp_id_c, name_c, email_c, title_c, comp_c, intent_c, stat_c, enrich_c in contacts_data:
+                    await db.execute("""
+                        INSERT INTO contacts (id, campaign_id, name, email, title, company, intent_score, current_step, status, enriched_data, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+                    """, (cid_c, camp_id_c, name_c, email_c, title_c, comp_c, intent_c, stat_c, json.dumps(enrich_c), now_str))
+
+                await db.execute("""
+                    INSERT INTO inbox_messages (id, contact_id, contact_name, contact_email, company, subject, body, sentiment, status, received_at, ai_draft_reply, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    "inb_01", "cnt_03", "Elena Rostova", "elena@nextgenfintech.com", "NextGen Fintech",
+                    "Re: Autonomous Outbound & Self-Healing Pipeline for NextGen Fintech",
+                    "Hi Alex,\n\nYes, Thursday at 2:00 PM EST works for a quick demo! Send over a calendar invite.\n\nBest,\nElena",
+                    "positive", "read", now_str,
+                    "Hi Elena,\n\nFantastic! I've sent over an invite for Thursday at 2:00 PM EST. Looking forward to showing you how the agent self-heals outbound deliverability.\n\nBest,\nAlex",
+                    now_str
+                ))
+
+                await db.execute("""
+                    INSERT INTO inbox_messages (id, contact_id, contact_name, contact_email, company, subject, body, sentiment, status, received_at, ai_draft_reply, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    "inb_02", "cnt_02", "David Chen", "david.chen@datastream.io", "Datastream",
+                    "Re: Solving intent drop-off and domain burn at Datastream",
+                    "Hey Alex,\n\nInteresting timing—we've actually been having deliverability issues with our outbound sequences lately. How does your agent determine when to kill a variant?",
+                    "positive", "unread", now_str,
+                    "Hi David,\n\nGreat question. The agent monitors real-time sentiment telemetry and bounce rates. When a variant experiences negative sentiment or dips below threshold, it immediately stops sending and mutates copy into an evolved Variant C for review.\n\nOpen to a 5-min walk-through tomorrow?\n\nBest,\nAlex",
+                    now_str
+                ))
+
+                await db.execute("""
+                    INSERT INTO agent_decisions (id, campaign_id, decision_type, reasoning, before_state, after_state, requires_approval, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+                """, (
+                    "dec_01", demo_cid, "proportional_batch_dispatched",
+                    "Pushed daily batch of 7 prospects into sequence across active A/B variants (4 Variant A / 3 Variant B). Enforced daily limit pacing: 7/25 sent today.",
+                    json.dumps({"sent_today_before": 0, "pending_before": 5}),
+                    json.dumps({"enrolled_in_batch": 7, "sent_today_after": 7}),
+                    now_str
+                ))
+
+                await db.execute("""
+                    INSERT INTO agent_decisions (id, campaign_id, decision_type, reasoning, before_state, after_state, requires_approval, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+                """, (
+                    "dec_02", demo_cid, "variant_ratio_rebalanced",
+                    "Promoted Variant A to Champion with score 8.6 following 3 consecutive positive sentiment signals and meeting booking from Elena Rostova (NextGen Fintech).",
+                    json.dumps({"variant_a_score": 6.5, "variant_b_score": 6.2}),
+                    json.dumps({"variant_a_score": 8.6, "champion": "var_champion_01"}),
+                    now_str
+                ))
+
+                await db.execute("""
+                    INSERT INTO approvals (id, decision_id, type, payload, status, created_at)
+                    VALUES (?, ?, ?, ?, 'pending', ?)
+                """, (
+                    "appr_01", "dec_02", "send_new_variant",
+                    json.dumps({
+                        "campaign_id": demo_cid,
+                        "variant_a": {
+                            "id": var_a_id,
+                            "subject": "Autonomous Outbound & Self-Healing Pipeline for {company}",
+                            "body": "Hi {name},\n\nNoticed {company} is scaling revenue operations this quarter. Most sales leaders we talk to struggle with burning outbound domains on cold lists.\n\nOur self-healing engine dynamically rewires email copy based on open and sentiment telemetry.\n\nOpen to a brief peek this Thursday?\n\nBest,\nAlex"
+                        },
+                        "variant_b": {
+                            "id": var_b_id,
+                            "subject": "Solving intent drop-off and domain burn at {company}",
+                            "body": "Hi {name},\n\nSaw high intent activity on revenue operations from your team recently.\n\nTraditional sequences keep sending generic copy even after interest signals shift. We built an autonomous closed-loop agent that protects sender reputation.\n\nWould you be against seeing a 2-minute demo?\n\nCheers,\nAlex"
+                        }
+                    }),
+                    now_str
+                ))
+
+                await db.commit()
+
     async def reset_db(self):
         """Wipes all transactional data and re-seeds fresh default reference emails."""
         if self.supabase:

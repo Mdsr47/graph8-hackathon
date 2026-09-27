@@ -3,10 +3,6 @@
     {
       "source": "/api/(.*)",
       "destination": "https://graph8-hackathon.onrender.com/api/$1"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/$1"
     }
   ]
 }
