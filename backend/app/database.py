@@ -36,6 +36,8 @@ DB_FILE = _get_db_path()
 class Database:
     def __init__(self):
         self.supabase = None
+        self._initialized = False
+        self._init_lock = None
         if settings.SUPABASE_URL and settings.SUPABASE_KEY and "your-project" not in settings.SUPABASE_URL:
             try:
                 from supabase import create_client
@@ -44,6 +46,18 @@ class Database:
             except Exception as e:
                 print(f"[DB] Failed to initialize Supabase ({e}), falling back to SQLite.")
                 self.supabase = None
+
+    async def ensure_initialized(self):
+        """Ensures all tables and seed data are initialized even if lifespan was not executed by serverless runtime."""
+        if self._initialized:
+            return
+        if self._init_lock is None:
+            import asyncio
+            self._init_lock = asyncio.Lock()
+        async with self._init_lock:
+            if not self._initialized:
+                await self.init_db()
+                self._initialized = True
 
     async def init_db(self):
         """Initializes tables in SQLite for local development & fallback."""
@@ -288,6 +302,7 @@ class Database:
 
         # Seed initial defaults if needed
         await self._seed_defaults_if_empty()
+        self._initialized = True
 
     async def _seed_defaults_if_empty(self):
         emails = await self.get_reference_emails()
@@ -313,8 +328,11 @@ class Database:
             })
 
         # Ensure demo user exists
-        demo_user = await self.get_user_by_email("demo@graph8.ai")
-        if not demo_user:
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT id FROM users WHERE LOWER(email) = 'demo@graph8.ai'")
+            existing_user = await cursor.fetchone()
+        if not existing_user:
             await self.create_user(
                 email="demo@graph8.ai",
                 password="password123",
@@ -1224,6 +1242,7 @@ class Database:
         org_id: str = "org_demo_01",
         user_id: Optional[str] = None
     ) -> Dict[str, Any]:
+        await self.ensure_initialized()
         uid = user_id or f"usr_{uuid.uuid4().hex[:12]}"
         created_at = datetime.now(timezone.utc).isoformat()
         pwd_hash = hash_password(password)
@@ -1245,6 +1264,7 @@ class Database:
         }
 
     async def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        await self.ensure_initialized()
         clean_email = email.lower().strip()
         async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
@@ -1263,6 +1283,7 @@ class Database:
             }
 
     async def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
+        await self.ensure_initialized()
         async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute("SELECT * FROM users WHERE id = ?", (user_id,))
@@ -1279,6 +1300,7 @@ class Database:
             }
 
     async def verify_user_credentials(self, email: str, password: str) -> Optional[Dict[str, Any]]:
+        await self.ensure_initialized()
         user = await self.get_user_by_email(email)
         if not user:
             return None
@@ -1289,6 +1311,7 @@ class Database:
         return None
 
     async def list_users(self) -> List[Dict[str, Any]]:
+        await self.ensure_initialized()
         async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute("SELECT id, email, name, role, org_id, created_at FROM users ORDER BY created_at ASC")

@@ -63,6 +63,8 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+from fastapi import FastAPI, Request
+
 # Enable CORS for local React development
 app.add_middleware(
     CORSMiddleware,
@@ -71,6 +73,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def ensure_db_initialized_middleware(request: Request, call_next):
+    try:
+        await db.ensure_initialized()
+    except Exception as e:
+        logger.error(f"[Middleware] DB ensure_initialized error: {e}")
+    response = await call_next(request)
+    return response
 
 # Register API Routers
 app.include_router(campaigns.router)
