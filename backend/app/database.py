@@ -327,6 +327,19 @@ class Database:
                 "status": "active"
             })
 
+        # Ensure mailbox settings configured
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            c_mbs = await db.execute("SELECT COUNT(*) FROM mailbox_settings")
+            mbs_count = (await c_mbs.fetchone())[0]
+            if mbs_count == 0:
+                now_str = datetime.now(timezone.utc).isoformat()
+                await db.execute("""
+                    INSERT OR REPLACE INTO mailbox_settings 
+                    (id, provider, smtp_host, smtp_port, smtp_username, smtp_password, imap_host, imap_port, imap_username, imap_password, from_email, from_name, status, last_synced_at)
+                    VALUES ('mb_default', 'gmail', 'smtp.gmail.com', 587, 'demo@graph8.ai', '••••••••', 'imap.gmail.com', 993, 'demo@graph8.ai', '••••••••', 'demo@graph8.ai', 'Alex Vance', 'active', ?)
+                """, (now_str,))
+                await db.commit()
+
         # Ensure demo user exists
         async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
             db.row_factory = aiosqlite.Row
@@ -341,6 +354,50 @@ class Database:
                 org_id="org_demo_01",
                 user_id="usr_demo_01"
             )
+
+        # Ensure inbox messages exist
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            c_inb = await db.execute("SELECT COUNT(*) FROM inbox_messages")
+            inb_count = (await c_inb.fetchone())[0]
+            if inb_count == 0:
+                now_str = datetime.now(timezone.utc).isoformat()
+                await db.execute("""
+                    INSERT INTO inbox_messages 
+                    (id, contact_id, contact_name, contact_email, company, subject, body, sentiment, status, received_at, ai_draft_reply, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    "inb_01", "cnt_01", "Elena Rostova", "elena.r@fintechscale.io", "FintechScale",
+                    "Re: Autonomous Outbound & Self-Healing Pipeline for FintechScale",
+                    "Hi Alex,\n\nYes, Thursday at 2:00 PM EST works for a quick demo! Send over a calendar invite.\n\nBest,\nElena",
+                    "positive", "unread", now_str,
+                    "Hi Elena,\n\nFantastic! I've sent over a calendar invite for Thursday at 2:00 PM EST. Looking forward to showing you how the agent self-heals outbound deliverability in real-time.\n\nBest,\nAlex",
+                    now_str
+                ))
+                await db.execute("""
+                    INSERT INTO inbox_messages 
+                    (id, contact_id, contact_name, contact_email, company, subject, body, sentiment, status, received_at, ai_draft_reply, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    "inb_02", "cnt_02", "Marcus Vance", "marcus.v@acmepayments.com", "Acme Payments",
+                    "Re: Numbers on booked meetings for Acme Payments",
+                    "Hey Alex,\n\nInteresting timing—we've actually been having deliverability issues with our outbound sequences lately. How does your agent determine when to kill a variant?",
+                    "positive", "read", now_str,
+                    "Hi Marcus,\n\nGreat question. The agent monitors real-time sentiment telemetry and bounce rates. When a variant experiences negative sentiment or dips below threshold, it immediately stops sending and mutates copy into an evolved Variant C for review.\n\nOpen to a 5-min walk-through tomorrow?\n\nBest,\nAlex",
+                    now_str
+                ))
+                await db.execute("""
+                    INSERT INTO inbox_messages 
+                    (id, contact_id, contact_name, contact_email, company, subject, body, sentiment, status, received_at, ai_draft_reply, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    "inb_03", "cnt_05", "Priya Sharma", "priya@datasync.ai", "DataSync AI",
+                    "Re: Outbound pipeline efficiency",
+                    "Hi Alex,\n\nCould you share a one-pager or case study on your recent benchmark results before we schedule a call?\n\nThanks,\nPriya",
+                    "neutral", "unread", now_str,
+                    "Hi Priya,\n\nAttached is our 1-page overview showing how the agent lifted reply rates from 2.1% to 8.4% across 1,200 verified contacts. Happy to answer any questions once you've reviewed!\n\nBest,\nAlex",
+                    now_str
+                ))
+                await db.commit()
 
         # Ensure demo campaign and rich live metrics exist
         async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
