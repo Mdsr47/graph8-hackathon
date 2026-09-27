@@ -108,6 +108,6 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "graph8-self-healing-agent",
-        "version": "1.0.2",
+        "version": "1.0.3",
         "simulation_mode": settings.SIMULATION_MODE
     }
