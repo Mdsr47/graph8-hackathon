@@ -1,3 +1,4 @@
+import os
 import asyncio
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
@@ -11,19 +12,25 @@ async def live_event_stream():
     Server-Sent Events (SSE) stream.
     Delivers real-time telemetry on decisions, events, approvals, and replies.
     """
+    is_serverless = any(os.environ.get(k) for k in ("VERCEL", "VERCEL_ENV", "AWS_LAMBDA_FUNCTION_NAME"))
+
     async def event_generator():
         queue = await sse_manager.subscribe()
         try:
             # Yield initial connection confirmation
             yield "event: connected\ndata: {\"status\": \"connected\", \"message\": \"SSE Live Stream Active\"}\n\n"
             
-            while True:
+            # On serverless, limit stream duration to prevent Vercel 10s lambda timeout
+            max_loops = 4 if is_serverless else None
+            loops = 0
+
+            while max_loops is None or loops < max_loops:
+                loops += 1
                 try:
-                    # Wait for next event with a 15-second heartbeat timeout
-                    msg = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    timeout_val = 2.0 if is_serverless else 15.0
+                    msg = await asyncio.wait_for(queue.get(), timeout=timeout_val)
                     yield msg
                 except asyncio.TimeoutError:
-                    # Heartbeat comment to keep HTTP connection alive
                     yield ": ping\n\n"
         except asyncio.CancelledError:
             pass

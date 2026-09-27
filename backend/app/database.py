@@ -14,17 +14,24 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, hashed: str) -> bool:
     return hash_password(password) == hashed
 
-if os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
-    DB_FILE = "/tmp/graph8_agent.db"
-    _orig_db = os.path.join(os.path.dirname(os.path.dirname(__file__)), "graph8_agent.db")
-    if os.path.exists(_orig_db) and not os.path.exists(DB_FILE):
-        try:
-            import shutil
-            shutil.copy2(_orig_db, DB_FILE)
-        except Exception:
-            pass
-else:
-    DB_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "graph8_agent.db")
+def _get_db_path() -> str:
+    # If in serverless environment or explicit Vercel / Lambda flag
+    if any(os.environ.get(k) for k in ("VERCEL", "VERCEL_ENV", "AWS_LAMBDA_FUNCTION_NAME", "LAMBDA_TASK_ROOT")):
+        return "/tmp/graph8_agent.db"
+    
+    local_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "graph8_agent.db")
+    # Verify if local directory is writable
+    try:
+        test_file = local_path + ".probe"
+        with open(test_file, "w") as f:
+            f.write("1")
+        os.remove(test_file)
+        return local_path
+    except Exception:
+        # Fall back to /tmp if read-only filesystem is encountered
+        return "/tmp/graph8_agent.db"
+
+DB_FILE = _get_db_path()
 
 class Database:
     def __init__(self):
