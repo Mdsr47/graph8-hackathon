@@ -12,6 +12,7 @@ body {
   color: #f3f4f6;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   overflow-x: hidden;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 /* Custom scrollbars */
@@ -39,4 +40,119 @@ body {
 
 .animate-pulse-ring {
   animation: pulse-ring 2s infinite ease-in-out;
+}
+
+/* ==========================================================================
+   LIGHT MODE DESIGN SYSTEM
+   Clean, modern enterprise SaaS aesthetics (Linear / Stripe style)
+   ========================================================================== */
+html.light, body.light {
+  color-scheme: light;
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+html.light ::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+html.light ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+html.light ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+html.light .bg-slate-950 {
+  background-color: #f8fafc !important;
+}
+
+html.light .bg-slate-900,
+html.light .bg-slate-900\/90,
+html.light .bg-slate-900\/80,
+html.light .bg-slate-900\/70,
+html.light .bg-slate-900\/60,
+html.light .bg-slate-900\/50,
+html.light .bg-slate-900\/40 {
+  background-color: #ffffff !important;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.06), 0 1px 2px 0 rgba(0, 0, 0, 0.04);
+}
+
+html.light .bg-slate-800,
+html.light .bg-slate-800\/90,
+html.light .bg-slate-800\/80,
+html.light .bg-slate-800\/70,
+html.light .bg-slate-800\/60,
+html.light .bg-slate-800\/50,
+html.light .bg-slate-800\/40 {
+  background-color: #f1f5f9 !important;
+}
+
+html.light .border-slate-800,
+html.light .border-slate-800\/80,
+html.light .border-slate-700,
+html.light .border-slate-700\/60,
+html.light .border-slate-700\/50 {
+  border-color: #e2e8f0 !important;
+}
+
+html.light .text-slate-100 {
+  color: #0f172a !important;
+}
+
+html.light .text-slate-200 {
+  color: #1e293b !important;
+}
+
+html.light .text-slate-300 {
+  color: #334155 !important;
+}
+
+html.light .text-slate-400 {
+  color: #64748b !important;
+}
+
+html.light .text-white {
+  color: #0f172a !important;
+}
+
+/* Preserve bright text inside action buttons & colored badges */
+html.light .bg-indigo-600,
+html.light .bg-indigo-500,
+html.light .bg-emerald-600,
+html.light .bg-emerald-500,
+html.light .bg-rose-600,
+html.light .bg-rose-500,
+html.light .bg-amber-500,
+html.light .bg-amber-600,
+html.light .bg-purple-600,
+html.light .bg-gradient-to-tr,
+html.light .bg-gradient-to-r {
+  color: #ffffff !important;
+}
+
+html.light .bg-indigo-600 .text-white,
+html.light .bg-indigo-500 .text-white,
+html.light .bg-emerald-600 .text-white,
+html.light .bg-emerald-500 .text-white,
+html.light .bg-rose-600 .text-white,
+html.light .bg-amber-500 .text-white,
+html.light button.bg-indigo-600 span,
+html.light button.bg-indigo-600 svg,
+html.light .badge,
+html.light .badge * {
+  color: #ffffff !important;
+}
+
+html.light input,
+html.light textarea,
+html.light select {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+html.light input::placeholder,
+html.light textarea::placeholder {
+  color: #94a3b8 !important;
 }

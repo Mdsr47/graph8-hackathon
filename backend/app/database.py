@@ -1,10 +1,18 @@
 import os
 import json
 import uuid
+import hashlib
 import aiosqlite
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from app.config import settings
+
+def hash_password(password: str) -> str:
+    salt = "graph8_revops_secret_2026"
+    return hashlib.sha256(f"{salt}:{password}".encode("utf-8")).hexdigest()
+
+def verify_password(password: str, hashed: str) -> bool:
+    return hash_password(password) == hashed
 
 DB_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "graph8_agent.db")
 
@@ -243,6 +251,22 @@ class Database:
                 created_at TEXT NOT NULL
             )""")
 
+            await db.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                name TEXT NOT NULL,
+                role TEXT DEFAULT 'Lead RevOps',
+                org_id TEXT DEFAULT 'org_demo_01',
+                created_at TEXT NOT NULL
+            )""")
+
+            try:
+                await db.execute("ALTER TABLE campaigns ADD COLUMN user_id TEXT")
+            except Exception:
+                pass
+
             await db.commit()
 
         # Seed initial defaults if needed
@@ -270,6 +294,18 @@ class Database:
                 "graph8_mailbox_id": "mb_g8_demo_01",
                 "status": "active"
             })
+
+        # Ensure demo user exists
+        demo_user = await self.get_user_by_email("demo@graph8.ai")
+        if not demo_user:
+            await self.create_user(
+                email="demo@graph8.ai",
+                password="password123",
+                name="Alex Vance",
+                role="Lead RevOps",
+                org_id="org_demo_01",
+                user_id="usr_demo_01"
+            )
 
     async def reset_db(self):
         """Wipes all transactional data and re-seeds fresh default reference emails."""
@@ -319,7 +355,8 @@ class Database:
                 "champion_variant_id": r["champion_variant_id"] if "champion_variant_id" in r.keys() else None,
                 "challenger_variant_id": r["challenger_variant_id"] if "challenger_variant_id" in r.keys() else None,
                 "created_at": r["created_at"],
-                "org_id": r["org_id"]
+                "org_id": r["org_id"],
+                "user_id": r["user_id"] if "user_id" in r.keys() else "usr_demo_01"
             } for r in rows]
 
     async def get_campaign(self, campaign_id: str) -> Optional[Dict[str, Any]]:
@@ -345,7 +382,8 @@ class Database:
                 "champion_variant_id": r["champion_variant_id"] if "champion_variant_id" in r.keys() else None,
                 "challenger_variant_id": r["challenger_variant_id"] if "challenger_variant_id" in r.keys() else None,
                 "created_at": r["created_at"],
-                "org_id": r["org_id"]
+                "org_id": r["org_id"],
+                "user_id": r["user_id"] if "user_id" in r.keys() else "usr_demo_01"
             }
 
     async def create_campaign(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -357,12 +395,13 @@ class Database:
         target_contacts = data.get("target_contacts_limit", 50)
         cycle_num = data.get("cycle_number", 1)
         cycle_days = data.get("cycle_duration_days", 15)
+        usr_id = data.get("user_id") or "usr_demo_01"
         async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
             await db.execute(
                 """INSERT INTO campaigns 
-                (id, name, status, icp_filters, reference_email_ids, daily_limit, target_contacts_limit, sent_today, cycle_number, cycle_start_date, cycle_duration_days, created_at, org_id) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (cid, data["name"], data.get("status", "draft"), icp, ref_ids, daily_lim, target_contacts, 0, cycle_num, created_at, cycle_days, created_at, data.get("org_id"))
+                (id, name, status, icp_filters, reference_email_ids, daily_limit, target_contacts_limit, sent_today, cycle_number, cycle_start_date, cycle_duration_days, created_at, org_id, user_id) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (cid, data["name"], data.get("status", "draft"), icp, ref_ids, daily_lim, target_contacts, 0, cycle_num, created_at, cycle_days, created_at, data.get("org_id"), usr_id)
             )
             await db.commit()
         return await self.get_campaign(cid)
@@ -1158,4 +1197,86 @@ class Database:
                 "pending_approvals": pending_approvals
             }
 
+    # --- USER AUTHENTICATION & MANAGEMENT ---
+    async def create_user(
+        self,
+        email: str,
+        password: str,
+        name: str,
+        role: str = "Lead RevOps",
+        org_id: str = "org_demo_01",
+        user_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        uid = user_id or f"usr_{uuid.uuid4().hex[:12]}"
+        created_at = datetime.now(timezone.utc).isoformat()
+        pwd_hash = hash_password(password)
+        clean_email = email.lower().strip()
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            await db.execute(
+                """INSERT OR REPLACE INTO users (id, email, password_hash, name, role, org_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (uid, clean_email, pwd_hash, name, role, org_id, created_at)
+            )
+            await db.commit()
+        return {
+            "id": uid,
+            "email": clean_email,
+            "name": name,
+            "role": role,
+            "org_id": org_id,
+            "created_at": created_at
+        }
+
+    async def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        clean_email = email.lower().strip()
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT * FROM users WHERE LOWER(email) = ?", (clean_email,))
+            r = await cursor.fetchone()
+            if not r:
+                return None
+            return {
+                "id": r["id"],
+                "email": r["email"],
+                "password_hash": r["password_hash"],
+                "name": r["name"],
+                "role": r["role"],
+                "org_id": r["org_id"],
+                "created_at": r["created_at"]
+            }
+
+    async def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+            r = await cursor.fetchone()
+            if not r:
+                return None
+            return {
+                "id": r["id"],
+                "email": r["email"],
+                "name": r["name"],
+                "role": r["role"],
+                "org_id": r["org_id"],
+                "created_at": r["created_at"]
+            }
+
+    async def verify_user_credentials(self, email: str, password: str) -> Optional[Dict[str, Any]]:
+        user = await self.get_user_by_email(email)
+        if not user:
+            return None
+        if verify_password(password, user["password_hash"]):
+            clean_user = dict(user)
+            clean_user.pop("password_hash", None)
+            return clean_user
+        return None
+
+    async def list_users(self) -> List[Dict[str, Any]]:
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT id, email, name, role, org_id, created_at FROM users ORDER BY created_at ASC")
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
 db = Database()
+

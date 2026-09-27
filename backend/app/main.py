@@ -18,7 +18,8 @@ from app.routers import (
     webhooks,
     events,
     mailboxes,
-    analytics
+    analytics,
+    auth
 )
 from app.services.scheduler_service import scheduler_service
 
@@ -64,6 +65,7 @@ app.include_router(webhooks.router)
 app.include_router(events.router)
 app.include_router(mailboxes.router)
 app.include_router(analytics.router)
+app.include_router(auth.router)
 
 @app.get("/api/stats")
 async def get_overview_stats():

@@ -10,14 +10,21 @@ import {
   MailCheck,
   Settings,
   Sparkles,
-  Zap
+  Zap,
+  Trophy,
+  LogOut,
+  User as UserIcon
 } from 'lucide-react';
+import { User } from '../types';
 
 interface SidebarProps {
   activePage: string;
   setActivePage: (page: string) => void;
   pendingApprovalsCount: number;
   inboxCount: number;
+  currentUser?: User | null;
+  onLogout?: () => void;
+  onOpenJudgeShowcase?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -25,6 +32,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setActivePage,
   pendingApprovalsCount,
   inboxCount,
+  currentUser,
+  onLogout,
+  onOpenJudgeShowcase,
 }) => {
   const navItems = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -82,18 +92,53 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
           );
         })}
+
+        {/* Judge Showcase Quick Nav Item */}
+        {onOpenJudgeShowcase && (
+          <div className="pt-2">
+            <button
+              onClick={onOpenJudgeShowcase}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-bold text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 transition shadow-sm"
+            >
+              <div className="flex items-center gap-2">
+                <Trophy className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+                <span>🏆 Judge Showcase</span>
+              </div>
+              <span className="text-[10px] uppercase tracking-wider text-amber-400 font-extrabold">MVP</span>
+            </button>
+          </div>
+        )}
       </nav>
 
-      {/* Autonomous Status Footer */}
-      <div className="p-4 border-t border-slate-800 bg-slate-900/50">
-        <div className="p-3 rounded-lg bg-slate-800/40 border border-slate-700/50">
-          <div className="flex items-center gap-2 mb-1.5">
-            <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-            <span className="text-xs font-semibold text-slate-300">LangGraph Cycle</span>
+      {/* User Profile Footer */}
+      <div className="p-3 border-t border-slate-800 bg-slate-900/60 space-y-2">
+        {currentUser && (
+          <div className="flex items-center justify-between p-2 rounded-lg bg-slate-800/50 border border-slate-700/60">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-600 to-amber-500 flex items-center justify-center font-bold text-xs text-white shrink-0 shadow-sm">
+                {currentUser.name ? currentUser.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : 'AV'}
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs font-semibold text-slate-100 truncate">{currentUser.name || 'Alex Vance'}</div>
+                <div className="text-[10px] text-slate-400 truncate">{currentUser.role || 'Lead RevOps'}</div>
+              </div>
+            </div>
+            {onLogout && (
+              <button
+                onClick={onLogout}
+                className="p-1.5 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-700/60 transition shrink-0"
+                title="Sign Out"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
-          <p className="text-[11px] text-slate-400 leading-relaxed">
-            Reinforcement self-healing loop active. Reallocating on sentiment telemetry.
-          </p>
+        )}
+
+        {/* Autonomous Status Micro-Card */}
+        <div className="p-2.5 rounded-lg bg-slate-800/30 border border-slate-800 flex items-center gap-2 text-[11px] text-slate-400">
+          <Sparkles className="w-3 h-3 text-indigo-400 shrink-0" />
+          <span className="truncate">LangGraph Reinforcement Loop Active</span>
         </div>
       </div>
     </aside>

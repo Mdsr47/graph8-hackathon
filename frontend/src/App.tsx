@@ -3,6 +3,9 @@ import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { SimulatorModal } from './components/SimulatorModal';
 import { ApprovalModal } from './components/ApprovalModal';
+import { JudgeShowcaseModal } from './components/JudgeShowcaseModal';
+import { ThemeProvider } from './context/ThemeContext';
+import { LoginPage } from './pages/LoginPage';
 
 // Pages
 import { Overview } from './pages/Overview';
@@ -25,10 +28,23 @@ import {
   InboxItem,
   ReferenceEmail,
   SettingsData,
-  OverviewStats
+  OverviewStats,
+  User
 } from './types';
 
-export const App: React.FC = () => {
+export const AppContent: React.FC = () => {
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    const saved = localStorage.getItem('graph8_user');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  });
+
   const [activePage, setActivePage] = useState<string>('overview');
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
 
@@ -45,6 +61,40 @@ export const App: React.FC = () => {
   // Modals
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
   const [activeApprovalModal, setActiveApprovalModal] = useState<Approval | null>(null);
+  const [isJudgeShowcaseOpen, setIsJudgeShowcaseOpen] = useState(false);
+
+  // Session verification on mount
+  useEffect(() => {
+    const checkAuth = async () => {
+      const token = localStorage.getItem('graph8_token');
+      if (token) {
+        try {
+          const res = await fetch('/api/auth/me', {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.authenticated && data.user) {
+              setCurrentUser(data.user);
+              localStorage.setItem('graph8_user', JSON.stringify(data.user));
+            }
+          }
+        } catch (e) {
+          console.error("Session verification failed", e);
+        }
+      }
+    };
+    checkAuth();
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch {}
+    localStorage.removeItem('graph8_token');
+    localStorage.removeItem('graph8_user');
+    setCurrentUser(null);
+  };
 
   // Fetch all core data
   const fetchAllData = async () => {
@@ -74,14 +124,15 @@ export const App: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchAllData();
-    const interval = setInterval(fetchAllData, 10000); // Polling backup
-    return () => clearInterval(interval);
-  }, []);
+    if (currentUser) {
+      fetchAllData();
+      const interval = setInterval(fetchAllData, 10000);
+      return () => clearInterval(interval);
+    }
+  }, [currentUser]);
 
   // SSE Live Feed Hook
   const { isConnected, activities } = useLiveFeed((eventType, data) => {
-    // Dynamically update states on real-time SSE arrival
     if (eventType === 'agent_decision') {
       setDecisions(prev => [data, ...prev]);
     } else if (eventType === 'approval_created') {
@@ -221,6 +272,17 @@ export const App: React.FC = () => {
     await fetchAllData();
   };
 
+  // If not authenticated, render login page with 1-click test credentials
+  if (!currentUser) {
+    return (
+      <LoginPage
+        onLoginSuccess={(user) => {
+          setCurrentUser(user);
+        }}
+      />
+    );
+  }
+
   const pendingApprovalsCount = approvals.filter(a => a.status === 'pending').length;
 
   return (
@@ -234,6 +296,9 @@ export const App: React.FC = () => {
         }}
         pendingApprovalsCount={pendingApprovalsCount}
         inboxCount={inboxItems.length}
+        currentUser={currentUser}
+        onLogout={handleLogout}
+        onOpenJudgeShowcase={() => setIsJudgeShowcaseOpen(true)}
       />
 
       {/* Main Container */}
@@ -243,6 +308,7 @@ export const App: React.FC = () => {
           isConnected={isConnected}
           onOpenSimulator={() => setIsSimulatorOpen(true)}
           onNewCampaign={() => setActivePage('campaigns')}
+          onOpenJudgeShowcase={() => setIsJudgeShowcaseOpen(true)}
           activeCampaignsCount={campaigns.filter(c => c.status === 'active').length}
         />
 
@@ -356,7 +422,27 @@ export const App: React.FC = () => {
         onClose={() => setActiveApprovalModal(null)}
         onResolve={handleResolveApproval}
       />
+
+      {/* Judge Showcase Modal */}
+      <JudgeShowcaseModal
+        isOpen={isJudgeShowcaseOpen}
+        onClose={() => setIsJudgeShowcaseOpen(false)}
+        onNavigate={(page) => {
+          setSelectedCampaignId(null);
+          setActivePage(page);
+        }}
+        onOpenSimulator={() => setIsSimulatorOpen(true)}
+      />
     </div>
   );
 };
+
+export const App: React.FC = () => {
+  return (
+    <ThemeProvider>
+      <AppContent />
+    </ThemeProvider>
+  );
+};
+
 export default App;

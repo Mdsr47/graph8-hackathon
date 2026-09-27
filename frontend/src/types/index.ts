@@ -263,3 +263,12 @@ export interface AnalyticsData {
     phase: string;
   };
 }
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  org_id: string;
+  created_at?: string;
+}
