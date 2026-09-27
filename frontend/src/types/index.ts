@@ -151,6 +151,7 @@ export interface SettingsData {
     sent_today?: number;
   };
   graph8_mailbox_settings_url: string;
+  custom_settings?: Record<string, any>;
 }
 
 export interface MailboxConfig {

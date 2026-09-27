@@ -437,7 +437,7 @@ class Graph8Client:
 
     # --- Mailboxes (Section 6c) ---
     async def list_mailboxes(self) -> List[Dict[str, Any]]:
-        """GET /mailboxes"""
+        """GET /mailboxes with fast fallback"""
         if self.simulation_mode:
             return [
                 {
@@ -452,12 +452,14 @@ class Graph8Client:
                 }
             ]
         try:
-            data = await self._request("GET", "/mailboxes")
-            if isinstance(data, dict) and "data" in data:
-                return data["data"]
-            return data if isinstance(data, list) else []
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                resp = await client.get(f"{self.base_url}/mailboxes", headers=self._headers())
+                if resp.status_code in (200, 201):
+                    data = resp.json()
+                    return data.get("data", data) if isinstance(data, dict) else data
         except Exception:
-            return []
+            pass
+        return []
 
     # --- Voice (Stretch Goal, Section 10) ---
     async def trigger_voice_call(self, contact_id: str, script_context: Dict[str, Any]) -> Dict[str, Any]:

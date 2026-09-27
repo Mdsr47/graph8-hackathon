@@ -10,9 +10,18 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 async def get_settings():
     db_settings = await db.get_settings()
     
-    # Mailbox status
-    mailboxes = await graph8_client.list_mailboxes()
-    active_mailbox = mailboxes[0] if mailboxes else None
+    # Mailbox status from local SQLite mailbox_settings
+    mb = await db.get_mailbox_settings()
+    active_mailbox = {
+        "status": mb.get("status", "disconnected") if mb else "disconnected",
+        "provider": mb.get("provider", "gmail") if mb else "gmail",
+        "email": mb.get("from_email") or mb.get("smtp_username") or "none",
+        "last_synced_at": mb.get("last_synced_at") if mb else None
+    } if mb else {
+        "status": "not_connected",
+        "provider": "gmail",
+        "email": "none"
+    }
 
     # Mask API keys
     masked_g8 = f"g8_...{settings.GRAPH8_API_KEY[-4:]}" if len(settings.GRAPH8_API_KEY) > 8 else ("Configured" if settings.GRAPH8_API_KEY else "Not Configured")
@@ -33,11 +42,7 @@ async def get_settings():
             "badge": "Voice escalation: logic complete — awaiting connected number",
             "threshold": 90
         },
-        "mailbox": active_mailbox or {
-            "status": "not_connected",
-            "provider": "gmail",
-            "email": "none"
-        },
+        "mailbox": active_mailbox,
         "graph8_mailbox_settings_url": "https://app.graph8.com/settings/mailboxes",
         "custom_settings": db_settings
     }

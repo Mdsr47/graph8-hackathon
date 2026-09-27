@@ -52,7 +52,12 @@ class LLMClient:
             logger.warning(f"[LLMClient] API error ({e}), utilizing intelligent local fallback.")
             return self._mock_generate(messages)
 
-    def generate_variants(self, icp_filters: Dict[str, Any], reference_emails: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def generate_variants(
+        self,
+        icp_filters: Dict[str, Any],
+        reference_emails: List[Dict[str, Any]],
+        rejection_feedback: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Generates 2 contrasting email variants (Angle A: Pain Point, Angle B: ROI/Metrics)."""
         ref_text = "\n\n".join([
             f"Reference Example #{i+1}:\nSubject: {r.get('subject')}\nBody:\n{r.get('body')}\nNotes: {r.get('style_notes', '')}"
@@ -63,9 +68,17 @@ class LLMClient:
 {json.dumps(icp_filters, indent=2)}
 
 Reference Examples to model after:
-{ref_text if ref_text else 'None provided, use best B2B cold email practices.'}
+{ref_text if ref_text else 'None provided, use best B2B cold email practices.'}"""
 
-Generate Variant A and Variant B in JSON."""
+        if rejection_feedback:
+            user_content += f"""
+
+CRITICAL HUMAN REVIEWER REJECTION FEEDBACK:
+The human reviewer REJECTED previous email variants with this specific reason/instruction:
+"{rejection_feedback}"
+You MUST strictly incorporate this feedback, discard the previous weak pitch angles, and synthesize 2 completely fresh, high-converting contrasting variants that satisfy the reviewer's instructions."""
+
+        user_content += "\n\nGenerate Variant A and Variant B in JSON."
 
         messages = [
             {"role": "system", "content": VARIANT_GENERATION_SYSTEM_PROMPT},

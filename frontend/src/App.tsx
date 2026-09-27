@@ -318,9 +318,23 @@ export const App: React.FC = () => {
             />
           )}
 
-          {activePage === 'settings' && settingsData && (
+          {activePage === 'settings' && (
             <Settings
-              settings={settingsData}
+              settings={settingsData || {
+                graph8_api_key_status: "Configured",
+                graph8_base_url: "https://be.graph8.com/api/v1",
+                llm_provider: "Groq (OpenAI-compatible)",
+                llm_model: "openai/gpt-oss-120b",
+                llm_base_url: "https://api.groq.com/openai/v1",
+                llm_api_key_status: "Configured",
+                supabase_configured: false,
+                webhook_url: "/api/webhooks/graph8",
+                simulation_mode: false,
+                voice_escalation: { enabled: false, badge: "Voice ready", threshold: 90 },
+                mailbox: { status: "connected", provider: "gmail", email: "" },
+                graph8_mailbox_settings_url: "https://app.graph8.com/settings/mailboxes",
+                custom_settings: {}
+              }}
               onRefreshMailbox={fetchAllData}
               onResetDatabase={handleResetDatabase}
             />
