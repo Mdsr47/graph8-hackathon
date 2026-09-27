@@ -41,15 +41,37 @@ async def resolve_approval(approval_id: str, req: ApprovalResolveRequest):
             camp_id = payload.get("campaign_id")
             if camp_id:
                 campaign = (await db.get_campaign(camp_id)) or {}
-                await graph8_client.launch_ab_test_campaign({
+                # 1. Create campaign in Graph8
+                g8_camp = await graph8_client.launch_ab_test_campaign({
                     "id": camp_id,
                     "name": campaign.get("name", "Outbound Campaign"),
                     "variants": [va, vb]
                 })
 
+                # 2. Create sequence in Graph8
+                g8_seq = await graph8_client.create_sequence(
+                    name=f"{campaign.get('name', 'Outbound')} - Sequencer",
+                    campaign_id=camp_id
+                )
+                seq_id = g8_seq.get("id", "seq_auto_01")
+
+                # 3. Add sequence step with Variant copy
+                await graph8_client.add_sequence_step(
+                    sequence_id=seq_id,
+                    step_order=1,
+                    subject=va.get("subject", "Quick note on deliverability"),
+                    body=va.get("body_template", "")
+                )
+
                 from app.services.scheduler_service import scheduler_service
                 batch_res = await scheduler_service.process_daily_batch(camp_id, force=False)
-                execution_result = {"action": "variants_activated", "status": "active", "batch_dispatch": batch_res}
+                execution_result = {
+                    "action": "variants_activated",
+                    "status": "active",
+                    "graph8_campaign": g8_camp,
+                    "graph8_sequence": g8_seq,
+                    "batch_dispatch": batch_res
+                }
             else:
                 execution_result = {"action": "variants_activated", "status": "active"}
 

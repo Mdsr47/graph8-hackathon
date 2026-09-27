@@ -791,6 +791,52 @@ class Database:
             )
             await db.commit()
 
+    async def get_contact(self, contact_id: str) -> Optional[Dict[str, Any]]:
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT * FROM contacts WHERE id = ?", (contact_id,))
+            r = await cursor.fetchone()
+            if not r:
+                return None
+            return {
+                "id": r["id"],
+                "campaign_id": r["campaign_id"],
+                "name": r["name"],
+                "email": r["email"],
+                "title": r["title"],
+                "company": r["company"],
+                "intent_score": r["intent_score"],
+                "current_step": r["current_step"],
+                "status": r["status"],
+                "enriched_data": json.loads(r["enriched_data"] or "{}"),
+                "created_at": r["created_at"]
+            }
+
+    async def get_contact_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        clean_email = email.lower().strip()
+        async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT * FROM contacts WHERE LOWER(email) = ? LIMIT 1", (clean_email,))
+            r = await cursor.fetchone()
+            if not r:
+                return None
+            return {
+                "id": r["id"],
+                "campaign_id": r["campaign_id"],
+                "name": r["name"],
+                "email": r["email"],
+                "title": r["title"],
+                "company": r["company"],
+                "intent_score": r["intent_score"],
+                "current_step": r["current_step"],
+                "status": r["status"],
+                "enriched_data": json.loads(r["enriched_data"] or "{}"),
+                "created_at": r["created_at"]
+            }
+
+    async def create_inbox_message(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        return await self.save_inbox_message(data)
+
     # --- VARIANTS ---
     async def get_variants(self, campaign_id: Optional[str] = None) -> List[Dict[str, Any]]:
         async with aiosqlite.connect(DB_FILE, timeout=30.0) as db:
